@@ -1,4 +1,4 @@
-def minkowskidistance(x,y,p):
+def minkowskidistance(x,y,p):       #闵可夫斯基距离
     import math
     import numpy as np 
     zipped_coordinate = zip(x,y)
