@@ -2,7 +2,7 @@
 - 👀 I’m interested in animation.
 - 🌱 I’m currently learning C and Python.
 - 💞️ I’m looking to collaborate on data structure.
-- 📫 How to reach me zhang200303292@qq.com .
+- 📫 How to reach me zjc20030329@outlook.com .
 
 <!---
 zhangjiancai/zhangjiancai is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
