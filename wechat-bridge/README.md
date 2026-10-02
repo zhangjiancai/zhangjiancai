@@ -17,6 +17,7 @@
 | 图片是怎么发出去的 | [2.5 媒体发送时序](#25-一次媒体发送时序) |
 | 我提的需求实现到哪了 | [3. 需求 → 实现对照表](#3-需求--实现对照表) |
 | 某个函数在哪一行 | [4. 代码导览](#4-代码导览按文件) |
+| 微信里能发哪些指令 | [COMMANDS.md](COMMANDS.md)（速查表）/ 第 5 节 |
 | 怎么启动/重启/看日志 | [6. 运维](#6-快速开始与运维) |
 | WSL 为什么吃盘、怎么清 | [8. WSL 侧](#8-wsl-侧崩溃转储rdp-守护与磁盘) |
 | 为什么这么贵、缓存怎么算 | [12. 成本与缓存](#12-成本与缓存2026-10-03-实测) |
@@ -128,6 +129,9 @@
 | `run-bridge.ps1` | 拉起桥接 + 日志按 5 MB 轮转 | — |
 | `run-bridge-hidden.vbs` | 用 wscript 无窗口启动 `run-bridge.ps1` | — |
 | `install-task.ps1` | 注册/更新/停止/卸载计划任务 | — |
+| `sync-backup.ps1` | 把可公开文件同步到 GitHub 备份仓库（白名单 + 密钥扫描） | — |
+| `COMMANDS.md` | 指令与操作速查：微信指令 / 本机脚本 / 环境变量开关 | — |
+| `AGENTS.md` | 本目录约定：改指令要同步哪三处、密钥不外传 | — |
 | `lean.patch.yml` | 瘦身档补丁：禁掉 computer-use 工具组（固定提示词 38.4k→11.6k tokens） | — |
 | `package.json` | 唯一的 npm 依赖：`@huggingface/transformers` | — |
 | `.env` | `DEEPSEEK_API_KEY` 等凭据（已 gitignore） | — |
@@ -543,7 +547,21 @@ pwsh -File wechat-bridge/install-task.ps1        # 内部会停旧进程再拉�
 
 `.state/backup/` 里的三个 `.mjs` 是**上一版快照**，回滚用。发布新版本时记得同步更新它。
 
-### 6.6 查看当前在位的进程与任务
+### 6.7 备份到 GitHub
+
+可公开的部分同步到公开仓库 `zhangjiancai/zhangjiancai` 的 `wechat-bridge/` 目录（[仓库里的 README](https://github.com/zhangjiancai/zhangjiancai/blob/main/wechat-bridge/README.md)、[指令速查](https://github.com/zhangjiancai/zhangjiancai/blob/main/wechat-bridge/COMMANDS.md)）：
+
+```powershell
+pwsh -File sync-backup.ps1 -WhatIf     # 演练：密钥扫描 + 列出要同步的文件，不写不推
+pwsh -File sync-backup.ps1             # 同步并推送
+```
+
+- **白名单 17 个文件**：五个 `.mjs`、四个启动/安装脚本、`package.json`/`package-lock.json`、`lean.patch.yml`、三份文档、`sync-backup.ps1`。
+- **永不外传**：`.env`（API key）、`.state/`（登录态、会话票据、配对用户、真实对话记录）、`node_modules/`。脚本按密钥形状扫描，命中任何一条就中止，什么都不写。
+- 备份仓库里的 `.gitignore` 由脚本生成（`.env` / `.state/` / `node_modules/`），是第二道防线。
+- **改了指令或文档就再跑一次**；README 与 COMMANDS.md 必须同一次改完（见 `AGENTS.md`）。
+
+### 6.8 查看当前在位的进程与任务
 
 ```powershell
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" |

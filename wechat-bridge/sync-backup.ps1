@@ -43,7 +43,6 @@ $files = [ordered]@{
   'COMMANDS.md'             = 'COMMANDS.md'
   'AGENTS.md'               = 'AGENTS.md'
   'sync-backup.ps1'         = 'sync-backup.ps1'
-  '.gitignore'              = '.gitignore'
 }
 
 # 密钥特征：按形状匹配，任何一条命中就中止。宁可误报，不可漏报。
