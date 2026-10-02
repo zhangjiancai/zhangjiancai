@@ -3,7 +3,8 @@
 # 由一次性计划任务 DSH-WeChat-Bridge-OnceRestart 调用，跑完自删任务定义。
 # 日志：.state/logs/restart.log
 $ErrorActionPreference = 'Continue'
-$root = 'C:\Users\zjc20\deepseek-harness\wechat-bridge'
+# 本机这份住在 .state\ 下，备份仓库里那份住在 wechat-bridge\ 根：两种布局都认。
+$root = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bridge.mjs')) { $PSScriptRoot } else { Split-Path -Parent $PSScriptRoot }
 $task = 'DSH-WeChat-Bridge'
 $once = 'DSH-WeChat-Bridge-OnceRestart'
 $log = Join-Path $root '.state\logs\restart.log'

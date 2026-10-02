@@ -3,6 +3,61 @@
 > 随手查的清单：微信里能发什么、电脑上能跑什么、有哪些开关。
 > 完整背景、架构与实测数据见 [README.md](README.md)。**两边必须同步改**——新增或修改任何指令时，README 的第 4.1 / 第 5 节和本文件一起更新。
 
+## 当前默认配置（2026-10-03 实测）
+
+这台上**实际生效**的值。优先级：`.state/wechat-bridge.json` 里持久化的设置 → `wechat-bridge/.env` → 代码默认值。
+
+| 项 | 当前值 | 在哪改 |
+| --- | --- | --- |
+| **提示词档位** | **lean** —— 固定提示词 **11.6k** tokens（完整档是 38.4k） | 微信 `/profile lean\|full`；或 `.env` 的 `WECHAT_LEAN_PROFILE` |
+| **本地预处理** | **开启** | 微信 `/pre off`；或 `WECHAT_PREPROCESS=0` |
+| 会话策略 | **每回合新建会话**，只带选中的历史轮次 | 跟着预处理走 |
+| 判定器 A（嵌入） | 进程内 ONNX `Xenova/paraphrase-multilingual-MiniLM-L12-v2`（384 维，约 120 MB） | `WECHAT_PRE_LOCAL_MODEL` |
+| 判定器 B（生成式） | 进程内 ONNX `onnx-community/Qwen2.5-0.5B-Instruct`（q8，约 490 MB） | `WECHAT_PRE_GEN_MODEL` / `_DTYPE` |
+| 相关性阈值 | 相关 ≥ **0.30**，选中某轮 ≥ **0.45**；词面兜底 0.06 / 0.10 | `WECHAT_PRE_LOW` / `_KEEP` |
+| 生成式闸门 | `embed` —— B 不能凭空引入 A 判为无关的轮次 | `WECHAT_PRE_GEN_GATE=none` 关掉（纯并集，实测 9/9 → 5/9） |
+| 回放前缀上限 | 总量 8000 字、单轮 600 字；参与判定的记录数 `0` = 整条时间线 | README 第 7.4 节 |
+| 关预处理时的回放 | 最近 4 轮、最多 4000 字 | `WECHAT_REPLAY_EXCHANGES` / `_MAX_CHARS` |
+| 模型 | `deepseek-official` / `deepseek-v4-flash` | `DSH_PROVIDER` / `DSH_MODEL` |
+| 权限 | `danger-full-access` —— 不询问审批，能读写任意路径 | `DSH_PERMISSION_MODE=workspace-write` 收紧 |
+| 默认工作区 | DSH 仓库根目录 | `DSH_CWD`；微信里 `/ws` 可临时切 |
+| 运行时上限 | 同时保留 3 个工作区的 dsh 子进程；单运行时 50 个会话后回收 | `DSH_MAX_RUNTIMES` / `DSH_MAX_SESSIONS` |
+| 回复分片 | 1200 字/条 | `WECHAT_MAX_CHARS` |
+| 回复脚注 | token 消耗 **开**、预处理判定 **开** | `WECHAT_TOKEN_FOOTER=0` / `WECHAT_PRE_NOTIFY=0` |
+| 授权 | 已配对 **1** 个微信用户（不设 `WECHAT_ALLOW` 时第一个发消息的人自动配对） | `.env` 的 `WECHAT_ALLOW` |
+| 计划任务 | `DSH-WeChat-Bridge`：登录即启 + 每 30 分钟看护；`IgnoreNew`；无运行时长上限；失败重试 999 次 / 每 1 分钟；RunLevel=Limited | `install-task.ps1` |
+| 日志 | `.state/logs/bridge.log`，超过 5 MB 轮转到 `.log.1` | `run-bridge.ps1 -MaxLogBytes` |
+| `.env` 里设了什么 | 只有 `DEEPSEEK_API_KEY`，其余全部走代码默认值 | — |
+
+没列到的项见 README 第 7 节（完整变量表，含每一项的默认值）。想核当前值：`/status` 看档位与权限，`/pre` 看判定器与阈值。
+
+## 新机器上从零跑起来
+
+1. **装依赖并构建 Harness 的 SDK 客户端**（桥接靠它拉起 dsh 子进程）：
+
+   ```powershell
+   cd <deepseek-harness 仓库根>
+   pnpm install
+   pnpm run build:lib
+   ```
+
+2. **装桥接自己的依赖**（只有一个 `@huggingface/transformers`）：
+
+   ```powershell
+   cd wechat-bridge
+   npm ci
+   ```
+
+3. **写凭据**：把 `.env.example` 复制成 `.env`，填上自己的 `DEEPSEEK_API_KEY`。`.env` 已被 `.gitignore` 忽略，不会被提交。
+
+4. **自检**：`node bridge.mjs --check`（有 key 时会跑一次真实对话并打印用量）。
+
+5. **登录**：`node bridge.mjs` —— 打印一个 `https://liteapp.weixin.qq.com/q/...` 链接，用手机微信打开确认授权，可能要输入手机上显示的数字。
+
+6. **后台常驻**：`pwsh -File install-task.ps1`；然后给机器人发一条消息完成配对。
+
+**注意**：仓库里**没有**登录态、会话记录和凭据（那些永不外传），所以每次换机器都要重新扫码。仓库里也**没有**本机那套 WSL / RDP 附加件（`wsl_rdp_keeper.sh`、`prune-wsl-crashes.ps1`），它们不属于这个桥接，是那台机器的额外设施。
+
 ## 一、微信里发的本地指令（桥接自己处理，不进模型、不花 token）
 
 | 指令 | 作用 | 备注 |

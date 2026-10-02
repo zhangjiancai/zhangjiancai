@@ -1,3 +1,5 @@
 .env
 .state/
 node_modules/
+.backup-repo
+.backup-deny

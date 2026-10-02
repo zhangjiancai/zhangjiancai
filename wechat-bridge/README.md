@@ -63,7 +63,7 @@
 ### 2.1 部署全景
 
 ```
-                           Windows 主机 ZJC20250914（用户 zjc20）
+                           Windows 主机 （本机）
   ┌────────────┐                                                        ┌──────────────────┐
   │  手机微信    │   iLink Bot API (HTTPS)   ┌──────────────────────┐    │  ~/.dsh/          │
   │  （你自己）  │ ◄═══════════════════════► │ ilinkai.weixin.qq.com│    │   models/  ONNX   │
@@ -135,6 +135,7 @@
 | `lean.patch.yml` | 瘦身档补丁：禁掉 computer-use 工具组（固定提示词 38.4k→11.6k tokens） | — |
 | `package.json` | 唯一的 npm 依赖：`@huggingface/transformers` | — |
 | `.env` | `DEEPSEEK_API_KEY` 等凭据（已 gitignore） | — |
+| `.env.example` | 凭据与开关模板：复制成 `.env` 再填（`Copy-Item .env.example .env`） | — |
 | `.gitignore` | 忽略 `.env`、`.state/`、`node_modules/`、`package-lock.json` | — |
 | `README.md` | 本文件 | — |
 
@@ -148,7 +149,7 @@
 | `logs/bridge.log` | 桥接 stdout/stderr，超过 5 MB 轮转到 `.log.1` |
 | `logs/restart.log` | 一次性重启脚本的日志 |
 | `backup/{bridge,preprocess,ilink-media}.mjs` | 上一版快照；重启失败时回滚（当前与线上逐字节一致） |
-| `restart-bridge-once.ps1` | 一次性重启脚本：等空闲 → 停 → 清理残留 → 起 → 健康检查 → 失败回滚 |
+| `restart-bridge-once.ps1` | 一次性重启脚本：等空闲 → 停 → 清理残留 → 起 → 健康检查 → 失败回滚（本机在 `.state/` 下，备份仓库里放在根目录；脚本按自身位置推导，两种布局都能跑） |
 
 **C. 本机其它位置（不在仓库里）**
 
@@ -478,12 +479,18 @@ node test-preprocess.mjs --scores
 
 ### 6.2 凭据与首次登录
 
-1. 在本目录建 `.env`（已被 `.gitignore` 忽略）：
+1. 把模板复制成 `.env` 再填自己的 key（`.env` 已被 `.gitignore` 忽略，不会被提交）：
+
+```powershell
+Copy-Item .env.example .env
+```
 
 ```ini
 DEEPSEEK_API_KEY=sk-你的key
 # DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 ```
+
+`.env.example` 里还列了常用开关（工作区、权限、提示词档位、白名单），不写就用默认值，完整表见第 7 节。
 
 2. 首次运行会打印一个 `https://liteapp.weixin.qq.com/q/...` 链接，用手机微信打开并确认授权（可能要输入手机微信上显示的数字）：
 
@@ -558,7 +565,9 @@ pwsh -File sync-backup.ps1             # 同步并推送
 
 - **白名单 17 个文件**：五个 `.mjs`、四个启动/安装脚本、`package.json`/`package-lock.json`、`lean.patch.yml`、三份文档、`sync-backup.ps1`。
 - **永不外传**：`.env`（API key）、`.state/`（登录态、会话票据、配对用户、真实对话记录）、`node_modules/`。脚本按密钥形状扫描，命中任何一条就中止，什么都不写。
-- 备份仓库里的 `.gitignore` 由脚本生成（`.env` / `.state/` / `node_modules/`），是第二道防线。
+- 三层防护：**白名单**（只有列出的 17 个文件能进）→ **密钥形状扫描** → **本机禁用词** 
+- 本机专属的配置放在两个**不发布**的小文件里：`.backup-repo`（克隆位置，一行路径）、`.backup-deny`（本机禁用词，一行一条正则，例如用户名、机器名、局域网网段）。两个都在 `.gitignore` 里，也不在白名单里。
+- 备份仓库里的 `.gitignore` 由脚本生成（`.env` / `.state/` / `node_modules/`），是最后一道防线。
 - **改了指令或文档就再跑一次**；README 与 COMMANDS.md 必须同一次改完（见 `AGENTS.md`）。
 
 ### 6.8 查看当前在位的进程与任务
@@ -677,7 +686,7 @@ WSL 不是这套桥接的运行环境（桥接跑在 Windows 上），但**它�
 **处置（2026-10-02 16:41）**：
 
 ```ini
-# C:\Users\zjc20\.wslconfig
+# %USERPROFILE%\.wslconfig
 [wsl2]
 guiApplications=false
 ```
@@ -708,7 +717,7 @@ guiApplications=false
 
 现在的读法是：找到用户名 token，读它后面**第二个** token 当状态；任何一行报 `Active` 就算有人持有会话。
 
-事件日志里当时看到 `.217` 和 `.30` 每分钟互抢一次，而 `192.168.31.217` **就是这台机器自己的 IP**——那是 keeper 的自连（经 WSL NAT 出网，源地址看起来和本机一样）。真正的你（`.30`，微软账号）每次连上就被这个本地自连踢掉（RDS session arbitration，reason code 5）。
+事件日志里当时看到两个来源每分钟互抢一次，而其中一个 **就是这台机器自己的 IP**——那是 keeper 的自连（经 WSL NAT 出网，源地址看起来和本机一样）。真正的你（从外面连进来）每次连上就被这个本地自连踢掉（RDS session arbitration，reason code 5）。
 
 ### 8.3 磁盘账本（2026-10-03 00:40 实测）
 
@@ -716,7 +725,7 @@ guiApplications=false
 | --- | --- | --- |
 | **C 盘整体** | 473.5 GB 总 / **52.5 GB 可用** | 清理前一度更低 |
 | `%TEMP%` 合计 | 0.61 GB | `wsl-crashes` 213 MB、`DiagOutputDir` 60 MB、各类安装器残留 |
-| `C:\Users\zjc20\.dsh` | **4.03 GB** | 其中 `models/` 3.75 GB、`speech-to-text/` 0.22 GB |
+| `%USERPROFILE%\.dsh` | **4.03 GB** | 其中 `models/` 3.75 GB、`speech-to-text/` 0.22 GB |
 | └ `~/.dsh/models/onnx-community/Qwen2.5-1.5B-Instruct` | **3.14 GB** | ⚠️ **当前配置不用的实验残留**（默认生成模型是 0.5B） |
 | └ `~/.dsh/models/onnx-community/Qwen2.5-0.5B-Instruct` | 0.48 GB | 判定器 B 在用 |
 | └ `~/.dsh/models/Xenova/paraphrase-multilingual-…` | 0.13 GB | 判定器 A 在用 |
@@ -724,7 +733,7 @@ guiApplications=false
 | `%LOCALAPPDATA%\pnpm` | 2.87 GB | pnpm store |
 | 仓库 `node_modules` | 1.80 GB | DSH 仓库依赖 |
 | `wechat-bridge/node_modules` | 0.36 GB | 只有 transformers + onnxruntime |
-| **WSL 的 ext4.vhdx** | **3.68 GB** | `%LOCALAPPDATA%\wsl\{235f9bee-…}\ext4.vhdx` |
+| **WSL 的 ext4.vhdx** | **3.68 GB** | `%LOCALAPPDATA%\wsl\{发行版-GUID}\ext4.vhdx` |
 | └ WSL 内部实际使用 | 2.1 GB | `/usr` 1.2 GB、`/var` 870 MB（apt cache 123 MB + lists 201 MB）、`/home` 52 KB |
 
 WSL 发行版：`Ubuntu-24.04`，WSL 2.7.13.0，内核 6.18.33.2-2。
@@ -760,7 +769,7 @@ wsl --manage Ubuntu-24.04 --set-sparse true   # WSL 2.7 支持；之后 VHDX 会
 
 ```powershell
 wsl --shutdown
-Optimize-VHD -Path "$env:LOCALAPPDATA\wsl\{235f9bee-b2dc-42af-b370-d4456fd55f0f}\ext4.vhdx" -Mode Full
+Optimize-VHD -Path "$env:LOCALAPPDATA\wsl\{发行版-GUID}\ext4.vhdx" -Mode Full
 ```
 
 ### 8.5 WSL 侧文件与任务清单
@@ -785,7 +794,7 @@ Optimize-VHD -Path "$env:LOCALAPPDATA\wsl\{235f9bee-b2dc-42af-b370-d4456fd55f0f}
 
 - **默认是完全访问**：桥接给 dsh 子进程设 `DSH_PERMISSION_MODE=danger-full-access`——不受文件沙箱限制、也不再询问审批，能读写工作区之外的任意路径、执行任意命令。无人值守时没人点「允许」，这是微信远程干活的前提。
 - 配对对象等于拿到了你机器的操作权，务必确认 `WECHAT_ALLOW` 里只有你自己。不设 `WECHAT_ALLOW` 时，**第一个发消息的人会被自动配对**并写入状态文件，其他人会被拒绝并收到自己的用户 ID。
-- 想收回权限：在 `.env` 里设 `DSH_PERMISSION_MODE=workspace-write`，再执行一次 `install-task.ps1`。实测对比（同一提示词：在 `C:\Users\zjc20\dsh-perm-probe` 写文件）：
+- 想收回权限：在 `.env` 里设 `DSH_PERMISSION_MODE=workspace-write`，再执行一次 `install-task.ps1`。实测对比（同一提示词：在 `%USERPROFILE%\dsh-perm-probe` 写文件）：
 
 | 权限模式 | 结果 |
 | --- | --- |

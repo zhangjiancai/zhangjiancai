@@ -15,7 +15,9 @@
 ## 别把密钥同步出去
 
 备份仓库（`zhangjiancai/zhangjiancai`）是**公开**的。`.env`、`.state/`、`node_modules/` 永远不进备份。
-只走 `sync-backup.ps1`：它有显式白名单和密钥特征扫描，命中就中止推送。不要手工 `git add` 这个目录。
+只走 `sync-backup.ps1`：三层防护（白名单 → 密钥形状扫描 → 本机禁用词），命中任何一条就中止推送。不要手工 `git add` 这个目录。
+
+本机专属配置放两个**不发布**的文件里：`.backup-repo`（备份克隆位置）、`.backup-deny`（本机禁用词，一行一条正则）。新增属于这台机器的词（用户名、机器名、网段）就加进 `.backup-deny`。
 
 ## 改完怎么生效
 
