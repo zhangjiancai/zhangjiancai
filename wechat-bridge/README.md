@@ -681,23 +681,46 @@ WSL 不是这套桥接的运行环境（桥接跑在 Windows 上），但**它�
 
 - 同一时间其它大头：`DiagOutputDir` 966 MB、`9.0.1-Release.260920012.exe` 468 MB、`vscode-stable-user-x64` 222 MB。**截图只是零头，真凶在 `%TEMP%`。**
 
-**根因**：WSLg 的 weston 处于崩溃循环。（当时按「省 token」处理，没有继续深挖 weston 内部；处置方式直接绕开了它。）
+**根因（2026-10-03 定案）**：转储本身就是 **ELF core dump**，解析它比猜快得多——
 
-**处置（2026-10-02 16:41）**：
+| 项 | 值 |
+| --- | --- |
+| 崩溃进程 | `/usr/bin/weston --backend=rdp-backend.so --modules=wslgd-notify.so --xwayland` |
+| 崩溃指令 | `/usr/lib/libweston-9/rdp-backend.so` **+0x1717b** |
+| 信号 | `SIGSEGV`(11)，`si_code=1`(SEGV_MAPERR)，**`si_addr=0x218`** —— 空指针 + 0x218 |
+| 崩溃前最后一条日志 | `wet_module_init: connect(/mnt/wslg/weston-notify.sock) failed No such file or directory` |
+| 周期 | 启动后约 **104 秒**必崩，每次约 107 MB 转储 |
+
+所以：**是 WSLg 自带的 weston RDP 后端自己空指针**，与本机配置、与这座桥接、与 RDP keeper 都无关。两个转储的崩溃点、日志、周期完全一致。
+
+**为什么一开始查不出来**：当时的思路是「WSL 崩了」，其实崩的是 WSLg 里的 weston；而 weston 跑在 WSLg 的**系统发行版**里，在 Ubuntu 里 `ps` 根本看不到它。名字里的 `_usr_bin_weston` 才是唯一线索。
+
+**触发条件不明**：2026-10-02 16:1x~16:4x 连续复现约 30 分钟；之后重启 WSL 就不再出现（2026-10-03 01:47 专门开回 WSLg 观察 15 分钟，零崩溃）。所以**不能宣称已修复上游缺陷**，只能保证它再也吃不掉盘。
+
+**三道防线**：
+
+| # | 防线 | 作用 | 位置 |
+| --- | --- | --- | --- |
+| 1 | `maxCrashDumpCount=2` | WSL 内置上限：**任何**进程的崩溃转储最多留 2 个（默认 10），约 214 MB 封顶 | `%USERPROFILE%\.wslconfig` |
+| 2 | `guiApplications=false` | 不启动 WSLg 就没有 weston 可崩（这台机器的 WSL 只跑无头 RDP keeper，不需要 WSLg） | 同上 |
+| 3 | 崩溃循环看护 | 每 10 分钟检查：15 分钟内出现 ≥3 个**新**转储即判定循环，自动把 `guiApplications` 关回去 + `wsl --shutdown` 止血，并尽力推一条微信通知 | `~/.dsh/prune-wsl-crashes.ps1`（任务 `DSH-Prune-WslCrashes`） |
+
+看护脚本的循环检测是**有状态**的（记住见过哪些转储），不能按「目录里有几个文件」判断——第 1 道防线会让目录里始终只有 2 个文件，那样检测永远不会触发。
+
+**处置（2026-10-02 16:41 首次，2026-10-03 01:53 定案）**：
 
 ```ini
 # %USERPROFILE%\.wslconfig
 [wsl2]
 guiApplications=false
+maxCrashDumpCount=2
 ```
 
-然后 `wsl --shutdown` 重新引导。结果：最后一次转储停在 **16:40:19**，之后零新增；WSLg 挂载数 0、`weston` 进程 0；RDP 会话没断（keeper 不依赖 WSLg，自己跑在 Xvfb 上）。
+然后 `wsl --shutdown` 重新引导。结果：最后一次转储停在 16:40:19，之后零新增；RDP 会话没断（keeper 不依赖 WSLg，自己跑在 Xvfb 上）。
 
-**保险**：计划任务 `DSH-Prune-WslCrashes` 每 10 分钟跑一次 `~/.dsh/prune-wsl-crashes.ps1`，只保留最新 2 个转储；日志自身也只留最近 200 行，避免它自己变成负担。
+**代价与回退**：`guiApplications=false` 关掉了 WSLg，WSL 里跑不了 GUI 程序。要跑就把这行改成 `true` 再 `wsl --shutdown`——万一 weston 又开始崩，第 1 道防线把占用压到 214 MB 以内，第 3 道防线会在 15 分钟内自动把它关回去。RDP keeper 用 `Xvfb` 虚拟屏，不依赖 WSLg，两种设置下都不受影响。
 
-**现状（2026-10-03 00:40 实测）**：`%TEMP%\wsl-crashes` 2 个文件共 **213 MB**，最新的停在 10-02 16:40；`.wslconfig` 的 `guiApplications=false` 仍在位。**崩溃循环没有复现。**
-
-**代价**：`guiApplications=false` 关掉了 WSLg（WSL 里跑不了 GUI 程序）。RDP keeper 用的是 `Xvfb` 虚拟屏，不依赖 WSLg，所以**不受影响**——这点在改动前专门确认过。
+**现状（2026-10-03 01:53 实测）**：`%TEMP%\wsl-crashes` 已清空（那 2 个转储分析完后删掉，释放 213 MB）；`.wslconfig` 为 `guiApplications=false` + `maxCrashDumpCount=2`。**上游缺陷仍在，但吃盘这条路已经封死。**
 
 ### 8.2 WSL 里的 RDP keeper
 

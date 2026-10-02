@@ -107,6 +107,21 @@
 | `wechat-bridge/` | `pwsh -File install-task.ps1 -Uninstall` | 停止并删除任务 |
 | `wechat-bridge/` | `pwsh -File sync-backup.ps1` | 把可公开文件同步到备份仓库并推送 |
 | 任意目录 | `Get-Content wechat-bridge\.state\logs\bridge.log -Wait -Tail 20` | 实时看日志 |
+| `~/.dsh/` | `pwsh -File prune-wsl-crashes.ps1` | WSL 崩溃转储看护：保留 2 个 + 崩溃循环自动止血（加 `-NoRemediate` 只报警不动 WSL） |
+
+### WSL 崩溃看护（本机额外件，不在备份仓库里）
+
+**为什么会有这个**：WSLg 自带的 weston（RDP 后端）会空指针崩溃并疯狂写转储 —— 每约 **104 秒**一个 **107 MB**，约 **4 GB/小时**。2026-10-03 从 core dump 定案：崩溃指令 `/usr/lib/libweston-9/rdp-backend.so +0x1717b`，`SIGSEGV / SEGV_MAPERR / si_addr=0x218`。是 WSLg 自身缺陷，与本机配置无关。
+
+| # | 防线 | 现状 |
+| --- | --- | --- |
+| 1 | `maxCrashDumpCount=2` | 已设。**任何**进程的转储最多留 2 个（默认 10），约 214 MB 封顶 |
+| 2 | `guiApplications=false` | 已设。不启动 WSLg 就没有 weston 可崩 |
+| 3 | 崩溃循环看护 | 计划任务 `DSH-Prune-WslCrashes` 每 10 分钟跑；15 分钟内出现 ≥3 个**新**转储就自动关掉 WSLg + `wsl --shutdown` 止血，并推一条微信 |
+
+**想跑 Linux GUI 程序**：把 `%USERPROFILE%\.wslconfig` 的 `guiApplications` 改成 `true`，再 `wsl --shutdown`。万一 weston 又开始崩：占用被压到 214 MB 以内，第 3 道防线会在 15 分钟内自动关回来。
+
+日志：`~/.dsh/prune-wsl-crashes.log`。详细来龙去脉见 [README](README.md) 第 8.1 节。
 
 ## 四、环境变量开关（写在 `wechat-bridge/.env`，**改完要重启桥接**）
 
