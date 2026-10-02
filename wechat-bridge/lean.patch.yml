@@ -1,0 +1,22 @@
+# 微信桥接的瘦身档：禁掉 computer-use 那一组工具。
+#
+# 实测（2026-10-03，dsh --profile sdk）固定提示词的构成：
+#   computer-use + cua-driver-native   26,837 tokens  ← 本文件禁掉的两个
+#   skill + workflow + subagent-fork    2,534
+#   AGENTS.md + packages/AGENTS.md      6,250
+#   plan-mode                             119
+#   系统提示 + 其余核心工具              2,456
+#   ————————————————————————————————————————————————
+#   合计                                38,417  → 禁掉后 11,580
+#
+# 固定提示词每一步都要重发，命中缓存后仍按 1/10 计价：省下的 26,837 × 0.1 ≈ 2,684
+# 有效 token/步，一个 20 步的回合约省 53,700。
+#
+# 视觉子代理（tool-subagent-vision）只占 220 tokens，保留。
+# 需要截图/桌面操作时在微信里发 /profile full（或设 WECHAT_LEAN_PROFILE=0）。
+
+- id: computer-use
+  disabled: true
+
+- id: computer-use-cua-driver-native
+  disabled: true

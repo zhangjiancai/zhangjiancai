@@ -1,0 +1,16 @@
+{
+  "name": "dsh-wechat-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "微信 ClawBot (iLink) 与 DeepSeek Harness (dsh --profile sdk) 的桥接进程",
+  "scripts": {
+    "start": "node bridge.mjs",
+    "check": "node bridge.mjs --check",
+    "check:wechat": "node bridge.mjs --check-wechat",
+    "test:preprocess": "node test-preprocess.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1"
+  }
+}
