@@ -40,7 +40,7 @@ const CLIENT_VERSION = String(((1 & 0xff) << 16) | ((0 & 0xff) << 8) | 0)
 
 const AGENT_CWD = resolve(process.env.DSH_CWD ?? REPO_ROOT)
 const PROVIDER = process.env.DSH_PROVIDER ?? 'deepseek-official'
-const MODEL = process.env.DSH_MODEL ?? 'deepseek-v4-flash'
+const MODEL = process.env.DSH_MODEL ?? 'deepseek-flash'
 const ALLOW = (process.env.WECHAT_ALLOW ?? '').split(',').map(s => s.trim()).filter(Boolean)
 const PERMISSION_MODE = process.env.DSH_PERMISSION_MODE || 'danger-full-access'
 const MAX_RUNTIMES = Number(process.env.DSH_MAX_RUNTIMES ?? 3)
@@ -60,8 +60,8 @@ const LONG_POLL_MS = 35000
 const TYPING_KEEPALIVE_MS = 5000
 const STALE_TOKEN_ERRCODE = -14
 /**
- * 瘦身 profile 的补丁文件：禁掉 computer-use 那一组（实测占固定提示词 26,837 tokens，
- * 是全部 38,417 的 70%）。视觉子代理只占 220 tokens，保留。
+ * 瘦身 profile 的补丁文件：禁掉 computer-use 那一组（实测 26,837 tokens，占完整档的 70%）。
+ * 图像外包子代理由 profile 的 DSH_VISION_CHANNEL 控制，默认关。
  */
 const LEAN_PATCH = join(HERE, 'lean.patch.yml')
 /** 默认是否启用瘦身 profile；微信里可用 /profile full 临时把截图能力开回来。 */
@@ -78,7 +78,7 @@ const HELP_TEXT = [
   '/ls [路径]   列出目录内容',
   '/send <路径> 把本机文件发到微信（图片直接显示，其他类型发文件）',
   '/pre [on|off] 本地预处理：判断新消息与上文是否相关，无关就开新会话省钱',
-  '/profile [lean|full] 提示词档位（lean 默认，禁用截图工具组，固定提示词 38.4k→11.6k）',
+  '/profile [lean|full] 提示词档位（lean 默认，禁用截图工具组，固定提示词 38.2k→11.4k）',
   '/history [n] 回看该工作区最近 n 轮对话（默认 10）',
   '/help        显示这条帮助',
 ].join('\n')
@@ -503,7 +503,7 @@ class DshRuntime {
       env: childEnv(),
     }
     if (process.env.DSH_BIN) options.dshBin = process.env.DSH_BIN
-    // 瘦身档：启动时用一个补丁层禁掉 computer-use 那一组工具，固定提示词从 38.4k 降到 11.6k。
+    // 瘦身档：启动时用一个补丁层禁掉 computer-use 那一组工具，固定提示词从 38.2k 降到 11.4k。
     if (this.lean) {
       if (existsSync(LEAN_PATCH)) options.patches = [LEAN_PATCH]
       else log('瘦身补丁不存在，按完整 profile 启动：' + LEAN_PATCH)
@@ -889,7 +889,7 @@ async function handleMessage(state, account, msg) {
     }
     await sendText(account, userId, [
       '提示词档位：' + (leanProfile
-        ? 'lean —— 禁用 computer-use 工具组，固定提示词约 11.6k tokens（实测 38.4k → 11.6k）'
+        ? 'lean —— 禁用 computer-use 工具组，固定提示词约 11.4k tokens（实测 38.2k → 11.4k）'
         : 'full —— 含截图/桌面操作工具，固定提示词约 38.4k tokens'),
       '补丁文件：' + LEAN_PATCH + (existsSync(LEAN_PATCH) ? '' : '（缺失，实际按 full 启动）'),
       note,
@@ -1096,7 +1096,7 @@ async function main() {
   log('允许的用户：' + (ALLOW.length ? ALLOW.join(', ') : state.paired.length ? state.paired.join(', ') : '(第一个发消息的用户将自动配对)'))
   // 预处理判定器后台预热（首次会下模型），不阻塞消息处理；关闭预处理时不做任何动作。
   if (state.preprocess !== false) warmupPreprocess(log)
-  log('提示词档位：' + (leanProfile ? 'lean（禁用 computer-use，固定提示词约 11.6k tokens）' : 'full（约 38.4k tokens）'))
+  log('提示词档位：' + (leanProfile ? 'lean（禁用 computer-use，固定提示词约 11.4k tokens）' : 'full（约 38.2k tokens）'))
   log('开始监听微信消息，Ctrl+C 退出。')
 
   const shutdown = async () => {

@@ -9,7 +9,7 @@
 
 | 项 | 当前值 | 在哪改 |
 | --- | --- | --- |
-| **提示词档位** | **lean** —— 固定提示词 **11.6k** tokens（完整档是 38.4k） | 微信 `/profile lean\|full`；或 `.env` 的 `WECHAT_LEAN_PROFILE` |
+| **提示词档位** | **lean** —— 固定提示词 **11.4k** tokens（完整档是 38.2k） | 微信 `/profile lean\|full`；或 `.env` 的 `WECHAT_LEAN_PROFILE` |
 | **本地预处理** | **开启** | 微信 `/pre off`；或 `WECHAT_PREPROCESS=0` |
 | 会话策略 | **每回合新建会话**，只带选中的历史轮次 | 跟着预处理走 |
 | 判定器 A（嵌入） | 进程内 ONNX `Xenova/paraphrase-multilingual-MiniLM-L12-v2`（384 维，约 120 MB） | `WECHAT_PRE_LOCAL_MODEL` |
@@ -18,7 +18,7 @@
 | 生成式闸门 | `embed` —— B 不能凭空引入 A 判为无关的轮次 | `WECHAT_PRE_GEN_GATE=none` 关掉（纯并集，实测 9/9 → 5/9） |
 | 回放前缀上限 | 总量 8000 字、单轮 600 字；参与判定的记录数 `0` = 整条时间线 | README 第 7.4 节 |
 | 关预处理时的回放 | 最近 4 轮、最多 4000 字 | `WECHAT_REPLAY_EXCHANGES` / `_MAX_CHARS` |
-| 模型 | `deepseek-official` / `deepseek-v4-flash` | `DSH_PROVIDER` / `DSH_MODEL` |
+| 模型 | `deepseek-official` / `deepseek-flash` | `DSH_PROVIDER` / `DSH_MODEL` |
 | 权限 | `danger-full-access` —— 不询问审批，能读写任意路径 | `DSH_PERMISSION_MODE=workspace-write` 收紧 |
 | 默认工作区 | DSH 仓库根目录 | `DSH_CWD`；微信里 `/ws` 可临时切 |
 | 运行时上限 | 同时保留 3 个工作区的 dsh 子进程；单运行时 50 个会话后回收 | `DSH_MAX_RUNTIMES` / `DSH_MAX_SESSIONS` |
@@ -75,7 +75,7 @@
 | `/pre` | 看预处理状态（判定器、阈值、模型缓存目录） | |
 | `/pre on` / `/pre off` | 开关本地预处理 | 落盘，重启仍生效 |
 | `/profile` | 看当前提示词档位 | |
-| `/profile lean` | 瘦身档：禁 computer-use，固定提示词 **11.6k** tokens | 默认档，省钱 |
+| `/profile lean` | 瘦身档：禁 computer-use，固定提示词 **11.4k** tokens | 默认档，省钱 |
 | `/profile full` | 完整档：含截图 / 桌面操作，固定提示词 **38.4k** tokens | 要截图时临时开，用完切回来 |
 
 **不以 `/` 开头的任何文本**都会当作提示词交给 DSH Agent，用完整工具能力（读写文件、执行命令、搜索）干活。
@@ -127,7 +127,7 @@
 
 | 变量 | 默认 | 作用 |
 | --- | --- | --- |
-| `WECHAT_LEAN_PROFILE` | `1` | 提示词档位默认值：`1` 瘦身（11.6k），`0` 完整（38.4k）；微信里 `/profile` 的持久化设置优先 |
+| `WECHAT_LEAN_PROFILE` | `1` | 提示词档位默认值：`1` 瘦身（11.4k），`0` 完整（38.2k）；微信里 `/profile` 的持久化设置优先 |
 | `WECHAT_PREPROCESS` | `1` | 本地预处理默认开关；`/pre off` 优先 |
 | `WECHAT_TOKEN_FOOTER` | `1` | 回复末尾附本回合 token 消耗 |
 | `WECHAT_PRE_NOTIFY` | `1` | 回复末尾附预处理判定 |
@@ -136,7 +136,8 @@
 | `DSH_PERMISSION_MODE` | `danger-full-access` | 子进程权限；改 `workspace-write` 可限制在工作区内 |
 | `DSH_CWD` | DSH 仓库根 | 默认工作区 |
 | `DSH_MAX_RUNTIMES` | `3` | 同时保留几个工作区的 dsh 子进程 |
-| `DSH_MODEL` / `DSH_PROVIDER` | `deepseek-v4-flash` / `deepseek-official` | 模型路由 |
+| `DSH_MODEL` / `DSH_PROVIDER` | `deepseek-flash` / `deepseek-official` | 模型路由 |
+| `DSH_VISION_CHANNEL` | 空（关） | 图像外包子代理 `subagent_vision`：`1` 启用图像外包通道；默认模型已支持图片，不需要它 |
 
 其余（预处理阈值、模型名、超时等）见 README 第 7 节。
 

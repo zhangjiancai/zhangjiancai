@@ -132,7 +132,7 @@
 | `sync-backup.ps1` | 把可公开文件同步到 GitHub 备份仓库（白名单 + 密钥扫描） | — |
 | `COMMANDS.md` | 指令与操作速查：微信指令 / 本机脚本 / 环境变量开关 | — |
 | `AGENTS.md` | 本目录约定：改指令要同步哪三处、密钥不外传 | — |
-| `lean.patch.yml` | 瘦身档补丁：禁掉 computer-use 工具组（固定提示词 38.4k→11.6k tokens） | — |
+| `lean.patch.yml` | 瘦身档补丁：禁掉 computer-use 工具组（固定提示词 38.2k→11.4k tokens） | — |
 | `package.json` | 唯一的 npm 依赖：`@huggingface/transformers` | — |
 | `.env` | `DEEPSEEK_API_KEY` 等凭据（已 gitignore） | — |
 | `.env.example` | 凭据与开关模板：复制成 `.env` 再填（`Copy-Item .env.example .env`） | — |
@@ -157,7 +157,7 @@
 | --- | --- |
 | `packages/sdk/client/lib/index.js` | 桥接依赖的 SDK 客户端构建产物（`pnpm run build:lib` 生成） |
 | `~/.dsh/models/` | ONNX 模型缓存（A 判定器 129 MB + B 判定器 488 MB，详见 8.3） |
-| `~/.dsh/profiles/sdk/cordis.patch.yml` | 为桥接会话加的 computer-use 插件、vision 子代理、vision 模型条目 |
+| `~/.dsh/profiles/sdk/cordis.patch.yml` | 为桥接会话加的 computer-use 插件与图像外包子代理（`DSH_VISION_CHANNEL` 控制，默认关） |
 | `~/.dsh/sessions/` | Web/桌面端会话日志（**不含**微信侧会话，机制见 2.7） |
 | `~/.dsh/wsl_rdp_keeper.sh` | WSL 内的 RDP 守护（见 8.2） |
 | `~/.dsh/run_rdp_keeper.ps1` / `run_rdp_keeper_hidden.vbs` | keeper 的 Windows 监管器与无窗口启动器 |
@@ -297,7 +297,7 @@ wechat-bridge/.state/
 | 1 | 10-01 16:07 | 更换到 wechat-todo 的工作目录 | 工作区概念：每工作区独立运行时 + 独立会话；`/ws`、`/ws+`、`/ws -`、`/cd`；相对路径按当前工作区解析，支持 `~` 与 `..` | `bridge.mjs:567-594`、`710-756`、`526-545` |
 | 2 | 10-01 16:11 | 能不能打开崩坏星穹铁道，帮我做日常 | 装了 computer-use 服务 + CUA Driver 原生 provider（能枚举窗口、点击、截图）；**游戏本身没做** | `~/.dsh/profiles/sdk/cordis.patch.yml` |
 | 3 | 10-01 16:15 | 先按上插件 | 同上：`dsh-computer-use` + `dsh-experimental-computer-use-cua-driver-native` 两个 insert | 同上 |
-| 4 | 10-01 16:26 | 让语言模型调用支持图片的模型，省的改默认模型 | 新增模型条目 `deepseek-v4-flash-vision-exp`（声明 image 输入）+ 额外 subagent 实例 `subagent_vision`，静态把子 agent 路由到 vision 模型；默认模型仍是 `deepseek-v4-flash` | 同上 |
+| 4 | 10-01 16:26 | 让语言模型调用支持图片的模型，省的改默认模型 | 新增模型条目 `deepseek-v4-flash-vision-exp`（声明 image 输入）+ 额外 subagent 实例 `subagent_vision`，静态把子 agent 路由到 vision 模型；默认模型仍是 `deepseek-v4-flash`。**2026-10-03 起默认关闭**，见第 21 条 | 同上 |
 | 5 | 10-01 16:29 | 重启重启 | 一次性计划任务 `DSH-WeChat-Bridge-OnceRestart` 延迟执行，避免「回复还没发出去就把自己杀了」；后来演化为带 Wait-Idle + 健康检查 + 回滚的 `.state/restart-bridge-once.ps1` | `.state/restart-bridge-once.ps1` |
 | 6 | 10-01 16:47 | 你来操作一下 RDP 会话（给了一个锁屏 PIN） | 确认那是锁屏 PIN 而不是账户密码（`LogonUser` 三种用户名格式实测均失败） | 会话记录 |
 | 7 | 10-01 17:28 | （微软账号 + 密码） | 用真实凭据救活会话；WSL 内 `xfreerdp3` + `Xvfb` 连本机，源地址经 NAT 与真实客户端不同 | `~/.dsh/wsl_rdp_keeper.sh` |
@@ -314,6 +314,7 @@ wechat-bridge/.state/
 | 18 | 10-02 21:37 | 之前的问题又出现了，自动把我挤下去了 | `session_state()` 两个叠加 bug：硬编码会话 ID、`qwinsta` 的 `>` 标记打在调用者自己的行上导致整行左移 → 改为按用户名定位、状态取其后第二个 token | `wsl_rdp_keeper.sh` |
 | 19 | 10-02 22:42 | `npx @deepseek-ai/dsh web` 报 `'dsh' is not recognized` | 诊断：在仓库目录里 `npx` 会命中本地 workspace 包 `apps/cli`（包名正是 `@deepseek-ai/dsh`），转去跑 `node_modules/.bin/dsh`，而 pnpm 不建这个链接 → 换目录执行或用 `pnpm dsh` | 未改代码 |
 | 20 | 10-03 01:00 | 预处理有效果吗、会不会掉缓存命中率、怎么提高 | 逐会话实测成本账本；定位到固定提示词 38.4k、其中 26.8k 是 computer-use；落地瘦身档 + `/profile` 开关 | `lean.patch.yml`、`bridge.mjs:465-469`、`471-540`、`877-899`（详见第 12 节） |
+| 21 | 10-03 10:30 | 切到最新模型 `deepseek-flash`；把图像专用通道断个使能（功能保留，默认不启用） | `DSH_MODEL` 默认改 `deepseek-flash`；`subagent_vision` 改由 `DSH_VISION_CHANNEL` 控制、默认关；profile 不再覆盖模型目录（默认目录里 `deepseek-flash` 自带 image 输入） | `bridge.mjs:43`；`~/.dsh/profiles/sdk/cordis.patch.yml` |
 
 ### 3.1 三个被实测推翻的设计
 
@@ -596,12 +597,13 @@ Get-ScheduledTask | Where-Object TaskName -like 'DSH-*' |
 | `DSH_PERMISSION_MODE` | `danger-full-access` | 子进程权限：`danger-full-access`（不提权、不询问）或 `workspace-write`（限制在工作区内） |
 | `DSH_MAX_RUNTIMES` | `3` | 同时保留多少个工作区的 dsh 子进程（LRU 回收） |
 | `DSH_MAX_SESSIONS` | `50` | 单个运行时累计多少个会话后回收它（预处理每回合新建会话） |
-| `DSH_PROVIDER` / `DSH_MODEL` | `deepseek-official` / `deepseek-v4-flash` | 模型路由 |
+| `DSH_PROVIDER` / `DSH_MODEL` | `deepseek-official` / `deepseek-flash` | 模型路由；`deepseek-flash`（DeepSeek-V41-Flash）自带 image 输入，computer-use 截图直接收得到 |
+| `DSH_VISION_CHANNEL` | 空（关） | 图像外包子代理 `subagent_vision`：设 `1` 启用「文本模型把看图外包给图片模型」那条通道（见第 3 节需求 4）；默认模型已支持图片，默认关 |
 | `DSH_INIT_TIMEOUT_MS` | `60000` | 拉起 dsh 子进程的握手超时（默认 10 秒在本机偏紧） |
 | `DSH_HOME` | 用户默认 | Harness home；设成独立目录可隔离会话数据 |
 | `DSH_REPO` | 本目录上一级 | DSH 仓库位置（用于找 SDK 客户端） |
 | `DSH_BIN` | 空 | 指定 dsh 可执行文件，覆盖 SDK 默认解析 |
-| `WECHAT_LEAN_PROFILE` | `1` | 提示词档位默认值：`1` = 瘦身（禁 computer-use，固定提示词 11.6k），`0` = 完整（38.4k）。微信里 `/profile` 的持久化设置优先 |
+| `WECHAT_LEAN_PROFILE` | `1` | 提示词档位默认值：`1` = 瘦身（禁 computer-use，固定提示词 11.4k），`0` = 完整（38.2k）。微信里 `/profile` 的持久化设置优先 |
 
 ### 7.2 iLink 与微信侧
 
@@ -843,7 +845,7 @@ Optimize-VHD -Path "$env:LOCALAPPDATA\wsl\{发行版-GUID}\ext4.vhdx" -Mode Full
 - 每个活跃工作区一个 dsh 子进程（内存开销随工作区数量增长），超过 `DSH_MAX_RUNTIMES` 会按最近使用回收；回收后再切回要 ~10 秒冷启动。
 - **接收方向只处理文字与语音转写**，你发图片进来机器人会回一句提示。
 - 群聊未支持，只在单聊里工作。
-- `deepseek-v4-flash` 不支持图像输入：桥接能截图、能发图，但**看不见图里的内容**。要看图得起 `subagent_vision` 子代理（见第 3 节需求 4）。
+- 图像外包子代理 `subagent_vision` 默认关闭（`DSH_VISION_CHANNEL=1` 开回来）：默认模型 `deepseek-flash` 自己收得到图片，只有换回纯文本默认模型时才需要它（见第 3 节需求 4）。
 - 微信侧会话不在 DSH 的会话存储里，Web/桌面端会话列表看不到它们。
 - 完全没有权限确认环节：`danger-full-access` 下 Agent 的任何写操作与命令都直接执行，不会先问你。
 - 预处理每回合新建会话，Agent 不保留上一回合的工作状态（读过的文件、内部计划），只保留被选中的对话轮次。
@@ -864,7 +866,7 @@ Optimize-VHD -Path "$env:LOCALAPPDATA\wsl\{发行版-GUID}\ext4.vhdx" -Mode Full
 
 **上传报错但看不到细节**：设 `WECHAT_MEDIA_DEBUG=1`，`ilink-media.mjs` 会打印 `getuploadurl` 响应、CDN 状态码与响应头参数长度。
 
-**微信里没有截图 / 桌面操作能力了**：默认的瘦身档禁用了 computer-use 那一组工具——它占固定提示词 26,837 tokens，是全部 38.4k 的 70%。需要时发 `/profile full` 开回来，用完发 `/profile lean` 切回去（见 12.5）。
+**微信里没有截图 / 桌面操作能力了**：默认的瘦身档禁用了 computer-use 那一组工具——它占固定提示词 26,837 tokens，是完整档的 70%。需要时发 `/profile full` 开回来，用完发 `/profile lean` 切回去（见 12.5）。
 
 **改了代码没生效**：Node 只在启动时读 `.mjs`，必须重启桥接进程（见 6.5）。
 
@@ -929,9 +931,10 @@ Optimize-VHD -Path "$env:LOCALAPPDATA\wsl\{发行版-GUID}\ext4.vhdx" -Mode Full
 | AGENTS.md + packages/AGENTS.md | 6,250 | 16.3% | 保留（仓库规范，有用） |
 | skill + workflow + subagent-fork | 2,534 | 6.6% | 保留（每步只 253，能力优先） |
 | 系统提示 + 其余核心工具 | 2,456 | 6.4% | 保留 |
-| 视觉子代理（tool-subagent-vision） | 220 | 0.6% | 保留（便宜，且是「文本模型外包看图」那条路） |
 | plan-mode | 119 | 0.3% | 保留 |
-| **合计** | **38,416** | | |
+| **合计** | **38,196** | | |
+
+图像外包子代理（`tool-subagent-vision`，220 tokens）默认关，不计入上表；`DSH_VISION_CHANNEL=1` 可开回来（见 7.1）。
 
 这条历史完全对得上：9-30 的桥接自检固定提示词是 11,383 tokens；10-01 16:18 装完 computer-use 后变成 38,196（+26,813）——**为了「玩游戏 / 看屏幕」加的那组工具，给之后每一次模型请求都加了 27k**。
 
@@ -941,16 +944,16 @@ Optimize-VHD -Path "$env:LOCALAPPDATA\wsl\{发行版-GUID}\ext4.vhdx" -Mode Full
 
 | | 固定提示词 | 每步有效成本 | 20 步回合的固定开销 |
 | --- | --- | --- | --- |
-| 完整档 | 38,417 | 3,842 | 76,840 |
-| **瘦身档** | **11,579** | **1,158** | **23,160** |
-| 变化 | −26,838（−69.9%） | −2,684 | −53,680 |
+| 完整档 | 38,194 | 3,819 | 76,388 |
+| **瘦身档** | **11,357** | **1,136** | **22,714** |
+| 变化 | −26,837（−70.3%） | −2,683 | −53,674 |
 
 **验证**（同一条 `node bridge.mjs --check` 路径，同一提示词，间隔两分钟）：
 
 | 档位 | 运行时日志 | 真实用量 | 固定提示词 |
 | --- | --- | --- | --- |
-| lean | `提示词=lean` | `inputTokens 5,819 + cacheRead 5,760` | **11,579** |
-| full | `提示词=full` | `inputTokens 144 + cacheRead 38,272` | **38,416** |
+| lean | `提示词=lean` | `inputTokens 11,357 + cacheRead 0` | **11,357** |
+| full | `提示词=full` | `inputTokens 37,810 + cacheRead 384` | **38,194** |
 
 差 26,837，与逐组禁用测出来的 computer-use 那一组完全对上。瘦身档下 `read` 与 `pwsh` 实测可用（读文件 + `node -v` 都成功）。
 
@@ -1001,4 +1004,5 @@ Optimize-VHD -Path "$env:LOCALAPPDATA\wsl\{发行版-GUID}\ext4.vhdx" -Mode Full
 10-02 22:42  npx dsh 报错      → 本地前缀命中 workspace 包
 10-03 00:31  系统整理          → 本文件
 10-03 01:04  成本优化          → lean.patch.yml + /profile（固定提示词 38.4k→11.6k）
+10-03 10:30  切最新模型/断使能 → DSH_MODEL=deepseek-flash；vision 通道默认关
 ```
