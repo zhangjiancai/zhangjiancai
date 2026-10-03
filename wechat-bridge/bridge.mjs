@@ -45,6 +45,10 @@ const ALLOW = (process.env.WECHAT_ALLOW ?? '').split(',').map(s => s.trim()).fil
 const PERMISSION_MODE = process.env.DSH_PERMISSION_MODE || 'danger-full-access'
 const MAX_RUNTIMES = Number(process.env.DSH_MAX_RUNTIMES ?? 3)
 const HISTORY_DIR = join(STATE_DIR, 'history')
+/** DSH 的命名工作区注册表：`$DSH_HOME/storages/workspace.json`，即 Web/GUI 里那份「项目」列表。 */
+const WORKSPACE_REGISTRY = join(resolve(process.env.DSH_HOME ?? join(homedir(), '.dsh')), 'storages', 'workspace.json')
+/** `/ws` 一次最多列出几个已登记工作区（微信单条 1200 字）。 */
+const MAX_WORKSPACE_LIST = 20
 const REPLAY_EXCHANGES = Number(process.env.WECHAT_REPLAY_EXCHANGES ?? 4)
 const REPLAY_MAX_CHARS = Number(process.env.WECHAT_REPLAY_MAX_CHARS ?? 4000)
 const MAX_TEXT_CHARS = Number(process.env.WECHAT_MAX_CHARS ?? 1200)
@@ -71,13 +75,16 @@ const HELP_TEXT = [
   '我在，直接把需求发给我就行。可用指令：',
   '/new         开一段新会话（清空上下文）',
   '/status      查看工作区、会话、权限与运行时状态',
-  '/ws          查看当前工作区',
-  '/ws <路径>   切换工作区（相对路径按当前工作区解析，支持 ~ 与 ..）',
+  '/ws          列出全部工作区（当前工作区标 *）',
+  '/pwd         查看当前工作区与该工作区的会话',
+  '/ws <名称>   切换工作区：DSH 已登记的工作区名（如 wechat-todo）',
+  '/ws <路径>   切换工作区：路径相对当前工作区解析，支持 ~ 与 ..',
   '/ws -        切回上一个工作区',
-  '/ws+ <路径>  新建目录并切过去',
+  '/ws+ <名称|路径> 新建目录并切过去',
   '/ls [路径]   列出目录内容',
   '/send <路径> 把本机文件发到微信（图片直接显示，其他类型发文件）',
-  '/pre [on|off] 本地预处理：判断新消息与上文是否相关，无关就开新会话省钱',
+  '/pre on|off  本地预处理：判断新消息与上文是否相关，无关就开新会话省钱',
+  '/pre         看预处理状态（判定器、阈值、模型缓存目录）',
   '/profile [lean|full] 提示词档位（lean 默认，禁用截图工具组，固定提示词 38.2k→11.4k）',
   '/history [n] 回看该工作区最近 n 轮对话（默认 10）',
   '/help        显示这条帮助',
@@ -88,7 +95,8 @@ const MODE = argv.has('--login') ? 'login'
   : argv.has('--check') ? 'check'
     : argv.has('--check-wechat') ? 'check-wechat'
       : argv.has('--check-media') ? 'check-media'
-        : 'run'
+        : argv.has('--check-workspaces') ? 'check-workspaces'
+          : 'run'
 
 /** 带时间戳的控制台输出。 */
 function log(...args) {
@@ -98,6 +106,14 @@ function log(...args) {
 /** 等待若干毫秒。 */
 function sleep(ms) {
   return new Promise(resolvePromise => setTimeout(resolvePromise, ms))
+}
+
+/**
+ * 取 `/命令` 后面那个参数，去掉包裹的方括号/圆括号并转小写。
+ * 帮助里写的是 `/pre [on|off]`，照抄连同方括号发过来的人不少，括号不能当成参数的一部分。
+ */
+function bareArg(text, command) {
+  return text.slice(command.length).trim().replace(/^[\[(]+/, '').replace(/[\])]+$/, '').toLowerCase()
 }
 
 /** 解析 KEY=VALUE 形式的 .env 文件，忽略注释与空行。 */
@@ -605,6 +621,29 @@ function resolveWorkspacePath(raw, current) {
   return isAbsolute(text) ? resolve(text) : resolve(current, text)
 }
 
+/** 读 DSH 已登记的命名工作区（标题 + 路径），按标题排序；注册表缺失或格式不认识时返回空表。 */
+function knownWorkspaces() {
+  let parsed
+  try {
+    parsed = JSON.parse(readFileSync(WORKSPACE_REGISTRY, 'utf8'))
+  } catch {
+    // 注册表不存在或不是 JSON：/ws 退回只按路径解析，不影响原有用法。
+    return []
+  }
+  return Object.values(parsed?.tables?.workspaces ?? {})
+    .filter(row => typeof row?.title === 'string' && typeof row?.path === 'string')
+    .map(row => ({ title: row.title, path: resolve(row.path) }))
+    .sort((a, b) => a.title.localeCompare(b.title, 'en'))
+}
+
+/** 按标题查注册表里的路径；标题唯一才认，找不到或重名返回空串（调用方再按路径解析）。 */
+function resolveWorkspaceName(name) {
+  const needle = String(name ?? '').trim().toLowerCase()
+  if (!needle) return ''
+  const hits = knownWorkspaces().filter(row => row.title.toLowerCase() === needle)
+  return hits.length === 1 ? hits[0].path : ''
+}
+
 /** 用户当前工作区；目录已消失时回落到默认工作区。 */
 function currentWorkspace(state, userId) {
   const workspace = state.workspaces[userId]
@@ -732,12 +771,28 @@ async function handleMessage(state, account, msg) {
     await sendText(account, userId, HELP_TEXT, contextToken)
     return
   }
-  if (text === '/pwd' || text === '/ws') {
+  if (text === '/pwd') {
     await sendText(account, userId, [
       '当前工作区：' + workspace,
       '该工作区会话：' + (state.sessions[sessionKey(userId, workspace)] ?? '(尚未创建)'),
-      '切换：/ws <路径>（/ws+ 新建并切换，/ws - 返回上一个，/ls 看目录）',
     ].join('\n'), contextToken)
+    return
+  }
+  if (text === '/ws' || text === '/ws list' || text === '/ws ls') {
+    const known = knownWorkspaces()
+    const previous = state.previousWorkspaces[userId]
+    await sendText(account, userId, [
+      '当前工作区：' + workspace,
+      '该工作区会话：' + (state.sessions[sessionKey(userId, workspace)] ?? '(尚未创建)'),
+      '上一个工作区：' + (previous && existsSync(previous) ? previous : '无'),
+      known.length > 0
+        ? 'DSH 已登记的工作区（' + known.length + '）：'
+        : '读不到 DSH 工作区注册表（' + WORKSPACE_REGISTRY + '），只能按路径切换：',
+      ...known.slice(0, MAX_WORKSPACE_LIST).map(row =>
+        (row.path === workspace ? '* ' : '  ') + row.title + '  ' + row.path + (existsSync(row.path) ? '' : '（目录不存在）')),
+      known.length > MAX_WORKSPACE_LIST ? '… 另有 ' + (known.length - MAX_WORKSPACE_LIST) + ' 个未显示' : '',
+      '切换：/ws <名称|路径>（/ws+ 新建并切换，/ws - 返回上一个，/ls 看目录）',
+    ].filter(Boolean).join('\n'), contextToken)
     return
   }
   if (text.startsWith('/ws+ ') || text.startsWith('/ws ') || text.startsWith('/cd ')) {
@@ -756,9 +811,11 @@ async function handleMessage(state, account, msg) {
       await sendText(account, userId, '已切回工作区：' + back, contextToken)
       return
     }
-    const target = resolveWorkspacePath(arg, workspace)
+    // 名称先查 DSH 工作区注册表；已存在的路径、以及 /ws+ 要新建的路径，仍按路径解析。
+    const byPath = resolveWorkspacePath(arg, workspace)
+    const target = byPath && existsSync(byPath) ? byPath : (resolveWorkspaceName(arg) || byPath)
     if (!target) {
-      await sendText(account, userId, '用法：/ws <路径>，例如 /ws D:\\work\\proj 或 /ws ~/proj', contextToken)
+      await sendText(account, userId, '用法：/ws <名称|路径>，例如 /ws wechat-todo、/ws D:\\work\\proj 或 /ws ~/proj', contextToken)
       return
     }
     if (!existsSync(target)) {
@@ -847,9 +904,16 @@ async function handleMessage(state, account, msg) {
     await sendText(account, userId, '已在该工作区开启新会话：' + state.sessions[key] + '\n工作区：' + workspace, contextToken)
     return
   }
-  if (text === '/pre' || text === '/pre status' || text === '/pre on' || text === '/pre off') {
-    if (text === '/pre on' || text === '/pre off') {
-      state.preprocess = text === '/pre on'
+  if (text === '/pre' || text.startsWith('/pre ') || text.startsWith('/pre[')) {
+    const arg = bareArg(text, '/pre')
+    // 认不出的参数当场回用法：漏给模型的话，它没有这个指令，只会回一句「我没有 /pre」。
+    if (arg !== '' && arg !== 'status' && arg !== 'on' && arg !== 'off') {
+      await sendText(account, userId, '没看懂这个用法：' + text +
+        '\n用法：/pre on 开启，/pre off 关闭，/pre 看状态（帮助里的方括号可带可不带）。', contextToken)
+      return
+    }
+    if (arg === 'on' || arg === 'off') {
+      state.preprocess = arg === 'on'
       saveState(state)
     }
     const info = preprocessInfo()
@@ -869,13 +933,18 @@ async function handleMessage(state, account, msg) {
       '两者取并集；B 不能凭空引入 A 判为无关的轮次',
       '阈值：相关 ≥ ' + (scoring ? info.lowLexical : info.low) + '，选中某轮 ≥ ' + (scoring ? info.keepLexical : info.keep),
       '模型缓存：' + info.cacheDir,
-      '用法：/pre on 开启，/pre off 关闭',
+      '用法：/pre on 开启，/pre off 关闭；/pre 看状态',
     ].join('\n'), contextToken)
     return
   }
 
-  if (text === '/profile' || text === '/profile lean' || text === '/profile full') {
-    const arg = text.slice('/profile'.length).trim().toLowerCase()
+  if (text === '/profile' || text.startsWith('/profile ') || text.startsWith('/profile[')) {
+    const arg = bareArg(text, '/profile')
+    if (arg !== '' && arg !== 'lean' && arg !== 'full') {
+      await sendText(account, userId, '没看懂这个用法：' + text +
+        '\n用法：/profile lean 省 token；/profile full 开回截图与桌面操作；/profile 看当前档位。', contextToken)
+      return
+    }
     let note = '当前档位未变。'
     if (arg === 'lean' || arg === 'full') {
       if ((arg === 'lean') === leanProfile) {
@@ -1071,6 +1140,18 @@ async function checkMedia(filePath) {
   log('媒体自检完成。')
 }
 
+/** 自检四：DSH 工作区注册表能否读到、名称能否解析（不连微信、不起 dsh 子进程）。 */
+function checkWorkspaces() {
+  log('工作区注册表：' + WORKSPACE_REGISTRY + (existsSync(WORKSPACE_REGISTRY) ? '' : '（读不到）'))
+  const known = knownWorkspaces()
+  log('已登记的工作区：' + known.length + ' 个')
+  for (const row of known) log('  ' + row.title + '  ->  ' + row.path + (existsSync(row.path) ? '' : '（目录不存在）'))
+  for (const name of process.argv.slice(2).filter(arg => !arg.startsWith('--'))) {
+    log('按名称解析 ' + name + ' -> ' + (resolveWorkspaceName(name) || '(未登记，会当作路径)'))
+  }
+  log('默认工作区（DSH_CWD）：' + AGENT_CWD)
+}
+
 async function main() {
   // 档位先落定：--check 分支也要用它。
   leanProfile = loadState().leanProfile ?? LEAN_PROFILE_DEFAULT
@@ -1080,6 +1161,7 @@ async function main() {
     const args = process.argv.slice(2)
     return checkMedia(args[args.indexOf('--check-media') + 1] ?? '')
   }
+  if (MODE === 'check-workspaces') return checkWorkspaces()
 
   mkdirSync(STATE_DIR, { recursive: true })
   const state = loadState()

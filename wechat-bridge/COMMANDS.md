@@ -20,7 +20,7 @@
 | 关预处理时的回放 | 最近 4 轮、最多 4000 字 | `WECHAT_REPLAY_EXCHANGES` / `_MAX_CHARS` |
 | 模型 | `deepseek-official` / `deepseek-flash` | `DSH_PROVIDER` / `DSH_MODEL` |
 | 权限 | `danger-full-access` —— 不询问审批，能读写任意路径 | `DSH_PERMISSION_MODE=workspace-write` 收紧 |
-| 默认工作区 | DSH 仓库根目录 | `DSH_CWD`；微信里 `/ws` 可临时切 |
+| 默认工作区 | DSH 仓库根目录 | `DSH_CWD`；微信里 `/ws` 看全部工作区、`/ws <名称>` 切 |
 | 运行时上限 | 同时保留 3 个工作区的 dsh 子进程；单运行时 50 个会话后回收 | `DSH_MAX_RUNTIMES` / `DSH_MAX_SESSIONS` |
 | 回复分片 | 1200 字/条 | `WECHAT_MAX_CHARS` |
 | 回复脚注 | token 消耗 **开**、预处理判定 **开** | `WECHAT_TOKEN_FOOTER=0` / `WECHAT_PRE_NOTIFY=0` |
@@ -64,19 +64,22 @@
 | --- | --- | --- |
 | `/help` | 显示帮助 | README 第 5 节那张表的精简版 |
 | `/status` | 工作区、会话、模型、权限、**提示词档位**、活跃运行时、历史路径、运行时长 | 排查问题先发这个 |
-| `/pwd`（或 `/ws`） | 查看当前工作区 + 该工作区的会话 id | |
-| `/ws <路径>` | 切换工作区 | `/cd` 同义；相对路径按当前工作区解析，支持 `~` 与 `..` |
-| `/ws+ <路径>` | 新建目录并切过去 | 目录不存在时用这个 |
+| `/pwd` | 查看当前工作区 + 该工作区的会话 id | |
+| `/ws` | 列出 DSH 已登记的全部工作区（当前标 `*`、目录不存在的标出来）+ 上一个工作区 | 读 `$DSH_HOME/storages/workspace.json`；桥接自己处理，不进模型、不花 token |
+| `/ws <名称\|路径>` | 切换工作区 | `/cd` 同义；已存在的路径优先，否则按名称查 DSH 工作区注册表（如 `/ws wechat-todo`）；相对路径按当前工作区解析，支持 `~` 与 `..` |
+| `/ws+ <名称\|路径>` | 新建目录并切过去 | 目录不存在时用这个 |
 | `/ws -` | 切回上一个工作区 | |
 | `/ls [路径]` | 列目录 | 最多 60 项 |
 | `/send <路径>` | 把本机文件发到微信 | `jpg/png/gif/webp/bmp` 显示成图片，其他类型当文件发 |
 | `/history [n]` | 回看该工作区最近 n 轮对话 | 默认 10，上限 50；回复末尾给出 jsonl 路径 |
 | `/new` | 在当前工作区开新会话，清空上下文 | 会在历史里划一条时间线，预处理不再选中它之前的内容 |
 | `/pre` | 看预处理状态（判定器、阈值、模型缓存目录） | |
-| `/pre on` / `/pre off` | 开关本地预处理 | 落盘，重启仍生效 |
+| `/pre on` / `/pre off` | 开关本地预处理 | 落盘，重启仍生效；照抄帮助里的 `/pre [off]`（带方括号）也认 |
 | `/profile` | 看当前提示词档位 | |
 | `/profile lean` | 瘦身档：禁 computer-use，固定提示词 **11.4k** tokens | 默认档，省钱 |
 | `/profile full` | 完整档：含截图 / 桌面操作，固定提示词 **38.4k** tokens | 要截图时临时开，用完切回来 |
+
+`/pre`、`/profile` 的参数会先去掉包裹的方括号/圆括号再判定（`bridge.mjs` 的 `bareArg`）；参数认不出来时桥接当场回用法，**不会**把整条漏给模型。
 
 **不以 `/` 开头的任何文本**都会当作提示词交给 DSH Agent，用完整工具能力（读写文件、执行命令、搜索）干活。
 
@@ -98,6 +101,7 @@
 | `wechat-bridge/` | `node bridge.mjs --check` | 自检：DSH 运行时能否启动（有 key 时会跑一次真实对话并打印用量） |
 | `wechat-bridge/` | `node bridge.mjs --check-wechat` | 自检：iLink 服务是否可达（不登录） |
 | `wechat-bridge/` | `node bridge.mjs --check-media <文件>` | 自检：媒体通道（给已配对用户发一张图） |
+| `wechat-bridge/` | `node bridge.mjs --check-workspaces [名称…]` | 自检：DSH 工作区注册表能否读到；给了名称再打印它解析到哪个路径 |
 | `wechat-bridge/` | `node send-media.mjs <文件> [--caption 文字]` | 旁路推文件，不重启桥接 |
 | `wechat-bridge/` | `node send-media.mjs --text "一句话"` | 旁路推纯文字 |
 | `wechat-bridge/` | `node test-preprocess.mjs [--scores]` | 预处理自检与阈值标定（9 条中文用例） |
@@ -158,6 +162,6 @@ Node 只在启动时读 `.mjs`，在磁盘上改文件对常驻进程没有任�
 
 1. `COMMANDS.md`（本文件）—— 第一、二节
 2. `README.md` —— 第 4.1 节指令分发表 + 第 5 节微信里的指令表
-3. `bridge.mjs` 的 `HELP_TEXT` 与 `/help` 输出（`bridge.mjs:70-84`）
+3. `bridge.mjs` 的 `HELP_TEXT` 与 `/help` 输出（`bridge.mjs:74-91`）
 
 改完跑 `pwsh -File sync-backup.ps1` 推到备份仓库。

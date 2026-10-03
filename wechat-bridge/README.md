@@ -284,6 +284,8 @@ wechat-bridge/.state/
 └── backup/*.mjs
 ```
 
+**工作区名从哪来**：`/ws` 与 `/ws <名称>` 读的是 DSH 自己的命名工作区注册表 `$DSH_HOME/storages/workspace.json`（默认 `~/.dsh/…`，即 Web/GUI 里那份「项目」列表），**只读、不改它**；读不到时 `/ws` 退回只按路径切换。
+
 **为什么微信侧会话不在 `~/.dsh/sessions/`**：实测 `dsh --profile sdk` 创建的会话不落成可读的会话日志（只在 `~/.dsh/storages/session_projcache/` 留一行投影缓存），进程结束即失忆。所以桥接自己记历史，并在「新进程/新运行时第一次接手一个旧会话」时把最近 `WECHAT_REPLAY_EXCHANGES` 轮回放给模型。代价：Web/桌面端的会话列表看不到微信会话，历史以桥接的 jsonl 为准。
 
 ---
@@ -307,14 +309,16 @@ wechat-bridge/.state/
 | 11 | 10-02 16:27 | 只保留部分截图，防止存储爆满；获取最新截图 | 清理 `~/.dsh/crops`（51→5）、桌面、`%TEMP%\dsh-*`；定位并处置 WSL 崩溃转储 | 见 8.1 |
 | 12 | 10-02 16:33 | 图片是怎么发出去的；查看 wsl 崩溃原因 | 三步协议写进 `ilink-media.mjs` 头注释；WSL 崩溃定位为 WSLg 的 weston 崩溃循环 | `ilink-media.mjs:1-13`；`~/.dsh/prune-wsl-crashes.ps1` |
 | 13 | 10-02 16:41 | 修改 wslconfig，然后重启 | `.wslconfig` 写 `[wsl2] guiApplications=false` + `wsl --shutdown`；崩溃循环停止 | `~/.wslconfig` |
-| 14 | 10-02 16:47 | 本地搭个小模型做预处理，判断消息与上文是否相关；要有开关 | `preprocess.mjs`：三级降级 + `/pre on\|off`（落盘）；关掉时退回持久会话 | `preprocess.mjs:233-291`、`497-572`；`bridge.mjs:817-842` |
+| 14 | 10-02 16:47 | 本地搭个小模型做预处理，判断消息与上文是否相关；要有开关 | `preprocess.mjs`：三级降级 + `/pre on\|off`（落盘）；关掉时退回持久会话 | `preprocess.mjs:233-291`、`497-572`；`bridge.mjs:859-891` |
 | 15 | 10-02 17:12 | 判定单元是一轮问答、输入是整个对话、输出是相关部分 | 改造：`toExchanges()` 以轮为单位；`WECHAT_PRE_SELECT_RECORDS=0` 表示整条时间线不截断；词面路径也不再拆半轮 | `preprocess.mjs:345-357`、`455-483` |
 | 16 | 10-02 17:24 | 用 AB 方案取并集 | 两个判定器并行 + 并集；再加「嵌入闸门」防止小模型假阳性 | `preprocess.mjs:455-483`、`517-524` |
 | 17 | 10-02 18:15 | 重启脚本是干啥；单轮为什么会有上限 | 解释 Node 只在启动时读 `.mjs`；上限已改为 0（不限），并加 Wait-Idle 防止打断长回合 | `.state/restart-bridge-once.ps1:53-78` |
 | 18 | 10-02 21:37 | 之前的问题又出现了，自动把我挤下去了 | `session_state()` 两个叠加 bug：硬编码会话 ID、`qwinsta` 的 `>` 标记打在调用者自己的行上导致整行左移 → 改为按用户名定位、状态取其后第二个 token | `wsl_rdp_keeper.sh` |
 | 19 | 10-02 22:42 | `npx @deepseek-ai/dsh web` 报 `'dsh' is not recognized` | 诊断：在仓库目录里 `npx` 会命中本地 workspace 包 `apps/cli`（包名正是 `@deepseek-ai/dsh`），转去跑 `node_modules/.bin/dsh`，而 pnpm 不建这个链接 → 换目录执行或用 `pnpm dsh` | 未改代码 |
-| 20 | 10-03 01:00 | 预处理有效果吗、会不会掉缓存命中率、怎么提高 | 逐会话实测成本账本；定位到固定提示词 38.4k、其中 26.8k 是 computer-use；落地瘦身档 + `/profile` 开关 | `lean.patch.yml`、`bridge.mjs:465-469`、`471-540`、`877-899`（详见第 12 节） |
+| 20 | 10-03 01:00 | 预处理有效果吗、会不会掉缓存命中率、怎么提高 | 逐会话实测成本账本；定位到固定提示词 38.4k、其中 26.8k 是 computer-use；落地瘦身档 + `/profile` 开关 | `lean.patch.yml`、`bridge.mjs:474-478`、`480-549`、`893-920`（详见第 12 节） |
 | 21 | 10-03 10:30 | 切到最新模型 `deepseek-flash`；把图像专用通道断个使能（功能保留，默认不启用） | `DSH_MODEL` 默认改 `deepseek-flash`；`subagent_vision` 改由 `DSH_VISION_CHANNEL` 控制、默认关；profile 不再覆盖模型目录（默认目录里 `deepseek-flash` 自带 image 输入） | `bridge.mjs:43`；`~/.dsh/profiles/sdk/cordis.patch.yml` |
+| 22 | 10-03 10:53 | 我发送这个 `/pre [off]` 指令，怎么回复这个；把模型的配置项都改了，改为最新的 | `/pre`、`/profile` 的参数先去方括号再判定，认不出的参数当场回用法——原来整条漏给模型，它只能回「我没有 /pre 这个指令」；模型默认值清到最新的 `deepseek-flash`（仓库里剩下的几处见第 21 条之外：`subagent-dsh-sdk`、`web-search-deepseek`、TS SDK 客户端、Python SDK、`acp-app` bundle） | `bridge.mjs:104-110`、`859-891`、`893-920` |
+| 23 | 10-03 11:21 | 列出全部的工作区，然后切换到 wechat-todo 这个工作区 | `/ws` 改成列出 DSH 已登记的全部工作区（读 `$DSH_HOME/storages/workspace.json`；当前工作区标 `*`、目录不存在的标出来）；`/ws <名称>` 支持按工作区名切换（已存在的路径优先，再查名称）；新增 `--check-workspaces` 自检。**切换动作只能由桥接执行**——Agent 在自己的回合里改不了桥接的工作区映射，所以清单在回合内给，切换要发指令 | `bridge.mjs:48-51`、`625-645`、`781-846`、`1143-1153` |
 
 ### 3.1 三个被实测推翻的设计
 
@@ -337,55 +341,58 @@ wechat-bridge/.state/
 
 ## 4. 代码导览（按文件）
 
-### 4.1 `bridge.mjs`（1119 行）
+### 4.1 `bridge.mjs`（1200 行）
 
 | 区块 | 行 | 说明 |
 | --- | --- | --- |
-| 常量 | 28-68 | 路径、iLink 参数、模型路由、权限模式、各类上限、瘦身档开关 |
-| `HELP_TEXT` | 70-84 | `/help` 的正文 |
-| CLI 模式 | 86-91 | `--login` / `--check` / `--check-wechat` / `--check-media` |
-| `log`/`sleep` | 94-102 | 带时间戳输出；等待 |
-| `parseDotEnv` | 104-115 | 解析 `KEY=VALUE`，忽略注释 |
-| `childEnv` | 117-126 | 子进程环境 = 仓库根 `.env` + 本目录 `.env` + 进程环境；强制注入权限模式 |
-| `loadState`/`saveState` | 128-146 | 原子写：写 `.tmp` 再 rename |
-| `randomUin`/`buildHeaders`/`baseInfo` | 148-172 | 每次请求随机 `X-WECHAT-UIN`（uint32 → 十进制字符串 → base64） |
-| `api` | 174-192 | 统一 iLink 调用；超时用 AbortController，长轮询里超时是正常的 |
-| `fetchQr`/`qrLogin` | 194-281 | 二维码 8 分钟有效，过期自动换新；处理 `wait/scaned/need_verifycode/expired/binded_redirect` 等全部状态 |
-| `chunkText` | 283-298 | 按 1200 字分片，尽量在换行处断开 |
-| `isStaleSession` | 300-303 | `-2`（会话不新鲜）/ `-14`（登录态过期）判定 |
-| `sendText` | 305-335 | 分片 + 加「(1/2)」序号 + 带 token 被拒则去 token 重发 |
-| `mediaApi`/`TOKEN_FOOTER` | 337-342 | 媒体接口超时 60 秒；token 脚注开关 |
-| `sumUsage`/`tokenFooter` | 351-380 | 一个回合内所有 step 的 usage 累加（不是取最后一次） |
-| `sendMedia` | 382-397 | 转调 `ilink-media.mjs` |
-| `extractMediaLines` | 399-414 | 摘 `MEDIA:<路径>` 行；文件不存在只记日志 |
-| `typingTicket`/`setTyping` | 416-446 | 「正在输入」票据缓存 10 分钟；失败静默忽略 |
-| `messageText`/`enqueue` | 448-463 | 取文本或语音转写；同一用户串行，不会并发跑多个回合 |
-| `leanProfile` | 465-469 | 当前提示词档位（`/profile` 改它；`state.leanProfile` 持久化） |
-| `DshRuntime` | 471-540 | 一个工作区一个 dsh 子进程；动态 import SDK 客户端；瘦身档在这里挂 `patches`；失败丢弃实例下次重拉 |
-| `runtimeFor` | 545-571 | 超 `DSH_MAX_RUNTIMES` 时按 LRU 关掉空闲运行时；档位变了就重建 |
-| `closeIdleRuntimes`/`closeAllRuntimes` | 573-589 | 回收空闲运行时（`/profile` 切档后用）；关掉全部 |
-| `recycleRuntimeIfNeeded` | 591-598 | 单运行时累计会话数超 `DSH_MAX_SESSIONS` 就回收（预处理每回合新建会话，不回收会持续涨内存） |
-| `resolveWorkspacePath` | 600-607 | 支持 `~`、绝对路径、相对当前工作区 |
-| 会话/历史 | 609-687 | `sessionKey`、`ensureSession`（旧版单 key 会话自动迁移）、`appendHistory`、`readHistory`、`replayPrefix` |
-| `handleMessage` | 694-983 | 全部指令在这里分发，见下表 |
-| `monitor` | 985-1029 | 长轮询主循环；`-14` 时提示重新扫码并退避 10 分钟 |
-| `checkDsh`/`checkWechat`/`checkMedia` | 1031-1072 | 三个自检 |
-| `main` | 1074-1119 | 档位落定、已有会话登记为「需要回放」、后台预热判定器 |
+| 常量 | 28-72 | 路径、iLink 参数、模型路由、权限模式、各类上限、DSH 工作区注册表、瘦身档开关 |
+| `HELP_TEXT` | 74-91 | `/help` 的正文 |
+| CLI 模式 | 93-99 | `--login` / `--check` / `--check-wechat` / `--check-media` / `--check-workspaces` |
+| `log`/`sleep` | 102-109 | 带时间戳输出；等待 |
+| `bareArg` | 115-117 | 取 `/命令` 后面的参数：去掉包裹的方括号/圆括号再转小写（帮助里写的是 `/pre [on\|off]`，照抄连括号发来也能用） |
+| `parseDotEnv` | 120-129 | 解析 `KEY=VALUE`，忽略注释 |
+| `childEnv` | 133-141 | 子进程环境 = 仓库根 `.env` + 本目录 `.env` + 进程环境；强制注入权限模式 |
+| `loadState`/`saveState` | 144-161 | 原子写：写 `.tmp` 再 rename |
+| `randomUin`/`buildHeaders`/`baseInfo` | 164-184 | 每次请求随机 `X-WECHAT-UIN`（uint32 → 十进制字符串 → base64） |
+| `api` | 190-207 | 统一 iLink 调用；超时用 AbortController，长轮询里超时是正常的 |
+| `fetchQr`/`qrLogin` | 210-296 | 二维码 8 分钟有效，过期自动换新；处理 `wait/scaned/need_verifycode/expired/binded_redirect` 等全部状态 |
+| `chunkText` | 299-310 | 按 1200 字分片，尽量在换行处断开 |
+| `isStaleSession` | 316-318 | `-2`（会话不新鲜）/ `-14`（登录态过期）判定 |
+| `sendText` | 321-350 | 分片 + 加「(1/2)」序号 + 带 token 被拒则去 token 重发 |
+| `mediaApi`/`TOKEN_FOOTER` | 353-358 | 媒体接口超时 60 秒；token 脚注开关 |
+| `sumUsage`/`tokenFooter` | 367-395 | 一个回合内所有 step 的 usage 累加（不是取最后一次） |
+| `sendMedia` | 398-409 | 转调 `ilink-media.mjs` |
+| `extractMediaLines` | 415-429 | 摘 `MEDIA:<路径>` 行；文件不存在只记日志 |
+| `typingTicket`/`setTyping` | 432-461 | 「正在输入」票据缓存 10 分钟；失败静默忽略 |
+| `messageText`/`enqueue` | 464-479 | 取文本或语音转写；同一用户串行，不会并发跑多个回合 |
+| `startedAt`/`leanProfile` | 481-484 | 进程起始时间；当前提示词档位（`/profile` 改它；`state.leanProfile` 持久化） |
+| `DshRuntime` | 487-556 | 一个工作区一个 dsh 子进程；动态 import SDK 客户端；瘦身档在这里挂 `patches`；失败丢弃实例下次重拉 |
+| `runtimeFor` | 561-586 | 超 `DSH_MAX_RUNTIMES` 时按 LRU 关掉空闲运行时；档位变了就重建 |
+| `closeIdleRuntimes`/`closeAllRuntimes` | 589-601 | 回收空闲运行时（`/profile` 切档后用）；关掉全部 |
+| `recycleRuntimeIfNeeded` | 607-613 | 单运行时累计会话数超 `DSH_MAX_SESSIONS` 就回收（预处理每回合新建会话，不回收会持续涨内存） |
+| `resolveWorkspacePath` | 616-622 | 支持 `~`、绝对路径、相对当前工作区 |
+| `knownWorkspaces`/`resolveWorkspaceName` | 625-645 | 读 DSH 工作区注册表 `$DSH_HOME/storages/workspace.json`（Web/GUI 里那份「项目」列表）；按标题查路径，重名或找不到返回空串。注册表读不到时返回空表，`/ws` 退回只按路径解析 |
+| 会话/历史 | 654-725 | `sessionKey`、`ensureSession`（旧版单 key 会话自动迁移）、`appendHistory`、`readHistory`、`replayPrefix` |
+| `handleMessage` | 733-1051 | 全部指令在这里分发，见下表 |
+| `monitor` | 1054-1097 | 长轮询主循环；`-14` 时提示重新扫码并退避 10 分钟 |
+| `checkDsh`/`checkWechat`/`checkMedia`/`checkWorkspaces` | 1100-1153 | 四个自检 |
+| `main` | 1155-1200 | 档位落定、已有会话登记为「需要回放」、后台预热判定器 |
 
 指令分发表（`handleMessage` 内）：
 
 | 指令 | 行 | 行为 |
 | --- | --- | --- |
-| `/help` | 731 | 回 `HELP_TEXT` |
-| `/pwd` `/ws` | 735 | 当前工作区 + 该工作区会话 id |
-| `/ws <路径>` `/ws+ <路径>` `/cd <路径>` `/ws -` | 743-789 | 切工作区；`+` 会先建目录；`-` 回上一个 |
-| `/ls [路径]` | 790-811 | 最多列 60 项 |
-| `/send <路径>` | 812-829 | 发文件（图片直接显示） |
-| `/history [n]` | 830-840 | 最近 n 轮（默认 10，上限 50）+ 记录文件路径 |
-| `/new` | 841-849 | 换新会话 id，**并在历史里划时间线**（否则旧话题会被预处理重新塞回来） |
-| `/pre [on\|off\|status]` | 850-875 | 开关与状态；状态里显示当前生效的判定器、阈值、缓存目录 |
-| `/profile [lean\|full]` | 877-899 | 切换提示词档位；切档时回收空闲运行时，下一条消息用新档位重建 |
-| `/status` | 901-912 | 工作区、会话、模型、权限、提示词档位、活跃运行时数、历史路径、运行时长 |
+| `/help` | 770 | 回 `HELP_TEXT` |
+| `/pwd` | 774-780 | 当前工作区 + 该工作区会话 id |
+| `/ws` `/ws list` | 781-797 | 列出 DSH 已登记的全部工作区（当前工作区标 `*`、目录不存在的标出来）、上一个工作区与切换用法 |
+| `/ws <名称\|路径>` `/ws+ <名称\|路径>` `/cd <名称\|路径>` `/ws -` | 798-846 | 切工作区：已存在的路径优先，否则按名称查 DSH 工作区注册表，都落空再当相对路径；`+` 会先建目录；`-` 回上一个 |
+| `/ls [路径]` | 847-868 | 最多列 60 项 |
+| `/send <路径>` | 869-886 | 发文件（图片直接显示） |
+| `/history [n]` | 887-897 | 最近 n 轮（默认 10，上限 50）+ 记录文件路径 |
+| `/new` | 898-906 | 换新会话 id，**并在历史里划时间线**（否则旧话题会被预处理重新塞回来） |
+| `/pre [on\|off\|status]` | 907-939 | 开关与状态；状态里显示当前生效的判定器、阈值、缓存目录。方括号带不带都认；认不出的参数当场回用法，不漏给模型 |
+| `/profile [lean\|full]` | 941-968 | 切换提示词档位；切档时回收空闲运行时，下一条消息用新档位重建；参数同样认方括号 |
+| `/status` | 970-982 | 工作区、会话、模型、权限、提示词档位、活跃运行时数、历史路径、运行时长 |
 
 ### 4.2 `ilink-media.mjs`（253 行）
 
@@ -442,13 +449,14 @@ node test-preprocess.mjs --scores
 | --- | --- |
 | `/help` | 显示帮助 |
 | `/status` | 工作区、会话、模型、权限、活跃运行时、运行时长 |
-| `/pwd`（或 `/ws`） | 查看当前工作区与该工作区的会话 |
-| `/ws <路径>` | 切换工作区（`/cd` 同义；相对路径按当前工作区解析，支持 `~` 与 `..`） |
-| `/ws+ <路径>` | 新建目录并切过去 |
+| `/pwd` | 查看当前工作区与该工作区的会话 |
+| `/ws` | 列出 DSH 已登记的全部工作区（当前工作区标 `*`、目录不存在的标出来） |
+| `/ws <名称\|路径>` | 切换工作区（`/cd` 同义）：已存在的路径优先，否则按名称查 DSH 工作区注册表（如 `/ws wechat-todo`）；相对路径按当前工作区解析，支持 `~` 与 `..` |
+| `/ws+ <名称\|路径>` | 新建目录并切过去 |
 | `/ws -` | 切回上一个工作区 |
 | `/ls [路径]` | 列出目录内容 |
 | `/send <路径>` | 把本机文件发到微信：`jpg/png/gif/webp/bmp` 直接显示成图片，其他类型作为文件 |
-| `/pre [on\|off]` | 查看或开关本地预处理 |
+| `/pre` / `/pre on` / `/pre off` | 看状态（判定器、阈值、缓存目录）或开关本地预处理；照抄帮助里的 `/pre [off]` 一样生效 |
 | `/profile [lean\|full]` | 提示词档位：`lean`（默认）省 token，`full` 开回截图/桌面操作 |
 | `/history [n]` | 回看该工作区最近 n 轮对话（默认 10），并给出记录文件路径 |
 | `/new` | 在**当前工作区**开新会话，清空上下文 |
@@ -509,6 +517,8 @@ node bridge.mjs
 node bridge.mjs --check                        # DSH 运行时能否启动；有 key 时会跑一次真实对话
 node bridge.mjs --check-wechat                 # iLink 服务是否可达（不登录）
 node bridge.mjs --check-media C:\path\shot.png  # 用已保存的登录态给已配对用户发一张图
+node bridge.mjs --check-workspaces             # DSH 工作区注册表能否读到（列出全部工作区）
+node bridge.mjs --check-workspaces wechat-todo  # 顺带打印名称解析到哪个路径
 ```
 
 ### 6.4 后台常驻与开机自启
