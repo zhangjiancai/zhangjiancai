@@ -115,15 +115,25 @@
 
 ### WSL 崩溃看护（本机额外件，不在备份仓库里）
 
-**为什么会有这个**：WSLg 自带的 weston（RDP 后端）会空指针崩溃并疯狂写转储 —— 每约 **104 秒**一个 **107 MB**，约 **4 GB/小时**。2026-10-03 从 core dump 定案：崩溃指令 `/usr/lib/libweston-9/rdp-backend.so +0x1717b`，`SIGSEGV / SEGV_MAPERR / si_addr=0x218`。是 WSLg 自身缺陷，与本机配置无关。
+**为什么会有这个**：WSLg 自带的 weston（RDP 后端）曾空指针崩溃并疯狂写转储 —— 每约 **104 秒**一个 **107 MB**，约 **4 GB/小时**。2026-10-03 从 ELF core dump 定案：崩溃指令 `/usr/lib/libweston-9/rdp-backend.so +0x1717b`，`SIGSEGV / SEGV_MAPERR / si_addr=0x218`。是 WSLg 自身缺陷。
 
-| # | 防线 | 现状 |
-| --- | --- | --- |
-| 1 | `maxCrashDumpCount=2` | 已设。**任何**进程的转储最多留 2 个（默认 10），约 214 MB 封顶 |
-| 2 | `guiApplications=false` | 已设。不启动 WSLg 就没有 weston 可崩 |
-| 3 | 崩溃循环看护 | 计划任务 `DSH-Prune-WslCrashes` 每 10 分钟跑；15 分钟内出现 ≥3 个**新**转储就自动关掉 WSLg + `wsl --shutdown` 止血，并推一条微信 |
+| 项 | 现状（2026-10-07） |
+| --- | --- |
+| WSL / 内核 / WSLg | **3.0.1.0 / 6.18.40.1-1 / 1.0.79**（10-07 从 2.7.13.0 / 6.18.33.2-2 / 1.0.73.2 升上来） |
+| `guiApplications` | **true**（升级后重新打开观察中；升级前一直是 false） |
+| `maxCrashDumpCount` | **2**（任何进程的转储最多留 2 个，约 214 MB 封顶） |
+| 崩溃循环看护 | 计划任务 `DSH-Prune-WslCrashes` 每 10 分钟跑（走 `run_prune_hidden.vbs` 无窗口）；15 分钟内出现 ≥3 个**新**转储就自动关掉 WSLg + `wsl --shutdown` 止血，并推一条微信 |
+| 10-07 观察结果 | 10 分钟内 weston 只启动 1 次、零崩溃；旧版每次启动必报的 `wet_module_init ... weston-notify.sock` 失败已消失 |
 
-**想跑 Linux GUI 程序**：把 `%USERPROFILE%\.wslconfig` 的 `guiApplications` 改成 `true`，再 `wsl --shutdown`。万一 weston 又开始崩：占用被压到 214 MB 以内，第 3 道防线会在 15 分钟内自动关回来。
+**结论口径**：**不算彻底解决**——原崩溃的触发条件仍不明，「升级后没再崩」不等于「缺陷已修」。现在靠「上游换代 + 三道防线」兜底。
+
+| 场景 | 怎么做 |
+| --- | --- |
+| 又崩了（微信收到看护通知 / 日志有 ⚠） | 已经自动止血，无需操作；把 `~/.dsh/prune-wsl-crashes.log` 和最新转储留着报给微软 |
+| 想跑 Linux GUI 程序 | `guiApplications` 已经是 `true`，直接跑；跑不了就 `wsl --shutdown` 重启 WSL |
+| 再复发，想继续往上修 | `wsl --update --pre-release` 上 3.0.2（含 MSRDC 1.2.7214→1.2.7391 与系统发行版 use-after-free 修复） |
+| 彻底不想再看到它 | 把 `guiApplications` 改回 `false` 再 `wsl --shutdown`（不启动 WSLg 就没有 weston 可崩） |
+| 手动演练看护 | `pwsh -File ~/.dsh/prune-wsl-crashes.ps1 -NoRemediate`（只删旧转储 + 报警，不动 WSL） |
 
 日志：`~/.dsh/prune-wsl-crashes.log`。详细来龙去脉见 [README](README.md) 第 8.1 节。
 

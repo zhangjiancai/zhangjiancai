@@ -714,25 +714,32 @@ WSL 不是这套桥接的运行环境（桥接跑在 Windows 上），但**它�
 | # | 防线 | 作用 | 位置 |
 | --- | --- | --- | --- |
 | 1 | `maxCrashDumpCount=2` | WSL 内置上限：**任何**进程的崩溃转储最多留 2 个（默认 10），约 214 MB 封顶 | `%USERPROFILE%\.wslconfig` |
-| 2 | `guiApplications=false` | 不启动 WSLg 就没有 weston 可崩（这台机器的 WSL 只跑无头 RDP keeper，不需要 WSLg） | 同上 |
+| 2 | `guiApplications` | 关掉 WSLg 就没有 weston 可崩。**2026-10-07 升级 WSL 后已重新打开观察**（见下） | 同上 |
 | 3 | 崩溃循环看护 | 每 10 分钟检查：15 分钟内出现 ≥3 个**新**转储即判定循环，自动把 `guiApplications` 关回去 + `wsl --shutdown` 止血，并尽力推一条微信通知 | `~/.dsh/prune-wsl-crashes.ps1`（任务 `DSH-Prune-WslCrashes`） |
 
 看护脚本的循环检测是**有状态**的（记住见过哪些转储），不能按「目录里有几个文件」判断——第 1 道防线会让目录里始终只有 2 个文件，那样检测永远不会触发。
 
-**处置（2026-10-02 16:41 首次，2026-10-03 01:53 定案）**：
+**处置时间线**：
 
-```ini
-# %USERPROFILE%\.wslconfig
-[wsl2]
-guiApplications=false
-maxCrashDumpCount=2
-```
+| 时间 | 动作 |
+| --- | --- |
+| 10-02 16:41 | `.wslconfig` 设 `guiApplications=false`，崩溃循环立即停止 |
+| 10-03 01:53 | 从 core dump 定案根因；`.wslconfig` 补 `maxCrashDumpCount=2`；看护脚本升级为「保留上限 + 崩溃循环自动止血」 |
+| **10-07 00:15** | **升级 WSL 2.7.13.0 → 3.0.1.0（内核 6.18.40.1-1，WSLg 1.0.73.2 → 1.0.79），重新打开 WSLg 观察** |
 
-然后 `wsl --shutdown` 重新引导。结果：最后一次转储停在 16:40:19，之后零新增；RDP 会话没断（keeper 不依赖 WSLg，自己跑在 Xvfb 上）。
+**升级后的验证（10-07 00:15~00:25，10 分钟）**：
 
-**代价与回退**：`guiApplications=false` 关掉了 WSLg，WSL 里跑不了 GUI 程序。要跑就把这行改成 `true` 再 `wsl --shutdown`——万一 weston 又开始崩，第 1 道防线把占用压到 214 MB 以内，第 3 道防线会在 15 分钟内自动把它关回去。RDP keeper 用 `Xvfb` 虚拟屏，不依赖 WSLg，两种设置下都不受影响。
+- weston **只启动 1 次**，零崩溃、零转储；
+- 旧版每次启动必报的 `wet_module_init: connect(/mnt/wslg/weston-notify.sock) failed No such file or directory`，在 WSLg 1.0.79 里**一次都没出现**（`grep -c` = 0）——notify 链路确实被动过了；
+- 桥接、RDP keeper、WSL 会话都正常。
 
-**现状（2026-10-03 01:53 实测）**：`%TEMP%\wsl-crashes` 已清空（那 2 个转储分析完后删掉，释放 213 MB）；`.wslconfig` 为 `guiApplications=false` + `maxCrashDumpCount=2`。**上游缺陷仍在，但吃盘这条路已经封死。**
+**能不能算「彻底解决」**：不能打包票。原崩溃的触发条件至今不明（10-02 连崩约 30 分钟后自行消失），所以「升级后没再崩」不等于「缺陷已修」。现在的状态是**上游换代 + 三道防线兜底**：真复发的话占用封顶 214 MB，看护脚本会在 15 分钟内自动关掉 WSLg 并推微信告诉你。
+
+**再复发时的下一步**：WSL 3.0.2（预览版）里有两条正好打在这条链路上 —— `Update Microsoft.RemoteDesktop.Client.MSRDC.SessionHost to 1.2.7391`（当前 1.2.7214）和「修复系统发行版的竞态与潜在 use-after-free」。届时 `wsl --update --pre-release`。
+
+**另一个可疑诱因（未处理）**：这台机器有 5 个显示适配器（含 Parsec、向日葵虚拟屏），WSL 的 `dmesg` 里 `dxgkio_query_adapter_info: Ioctl failed: -22` 反复出现——GPU 半虚拟化不干净。weston 的 rdp-backend 走 GPU 渲染，这是合理诱因之一；如果复发且升级无效，下一个怀疑对象是显卡驱动。
+
+**现状（2026-10-07 00:25 实测）**：`.wslconfig` = `guiApplications=true` + `maxCrashDumpCount=2`；转储 **0 个**；weston 存活；keeper 与桥接正常。
 
 ### 8.2 WSL 里的 RDP keeper
 
