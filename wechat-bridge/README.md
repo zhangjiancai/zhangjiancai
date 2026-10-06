@@ -299,7 +299,7 @@ wechat-bridge/.state/
 | 1 | 10-01 16:07 | 更换到 wechat-todo 的工作目录 | 工作区概念：每工作区独立运行时 + 独立会话；`/ws`、`/ws+`、`/ws -`、`/cd`；相对路径按当前工作区解析，支持 `~` 与 `..` | `bridge.mjs:567-594`、`710-756`、`526-545` |
 | 2 | 10-01 16:11 | 能不能打开崩坏星穹铁道，帮我做日常 | 装了 computer-use 服务 + CUA Driver 原生 provider（能枚举窗口、点击、截图）；**游戏本身没做** | `~/.dsh/profiles/sdk/cordis.patch.yml` |
 | 3 | 10-01 16:15 | 先按上插件 | 同上：`dsh-computer-use` + `dsh-experimental-computer-use-cua-driver-native` 两个 insert | 同上 |
-| 4 | 10-01 16:26 | 让语言模型调用支持图片的模型，省的改默认模型 | 新增模型条目 `deepseek-v4-flash-vision-exp`（声明 image 输入）+ 额外 subagent 实例 `subagent_vision`，静态把子 agent 路由到 vision 模型；默认模型仍是 `deepseek-v4-flash`。**2026-10-03 起默认关闭**，见第 21 条 | 同上 |
+| 4 | 10-01 16:26 | 让语言模型调用支持图片的模型，省的改默认模型 | 新增模型条目 `deepseek-v4-flash-vision-exp`（声明 image 输入）+ 额外 subagent 实例 `subagent_vision`，静态把子 agent 路由到 vision 模型；当时的默认模型仍是 `deepseek-v4-flash`（10-03 后默认改成了 `deepseek-flash`，视觉通道由 `DSH_VISION_CHANNEL` 控制、默认关）。**2026-10-03 起默认关闭**，见第 21 条 | 同上 |
 | 5 | 10-01 16:29 | 重启重启 | 一次性计划任务 `DSH-WeChat-Bridge-OnceRestart` 延迟执行，避免「回复还没发出去就把自己杀了」；后来演化为带 Wait-Idle + 健康检查 + 回滚的 `.state/restart-bridge-once.ps1` | `.state/restart-bridge-once.ps1` |
 | 6 | 10-01 16:47 | 你来操作一下 RDP 会话（给了一个锁屏 PIN） | 确认那是锁屏 PIN 而不是账户密码（`LogonUser` 三种用户名格式实测均失败） | 会话记录 |
 | 7 | 10-01 17:28 | （微软账号 + 密码） | 用真实凭据救活会话；WSL 内 `xfreerdp3` + `Xvfb` 连本机，源地址经 NAT 与真实客户端不同 | `~/.dsh/wsl_rdp_keeper.sh` |
