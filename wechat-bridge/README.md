@@ -891,6 +891,8 @@ Optimize-VHD -Path "$env:LOCALAPPDATA\wsl\{发行版-GUID}\ext4.vhdx" -Mode Full
 
 **C 盘又满了**：先看 `%TEMP%\wsl-crashes` 有没有在涨（见 8.1），再看 `~/.dsh/models`（见 8.4）。
 
+**日志里每天 04:00 前后有一分钟 `getupdates 失败`**：路由器在夜里 4 点重启，属正常现象，不用查。桥接按退避重试、下一轮自动恢复（实测每天 04:00:22 起连续 4~7 次失败，04:01 半前恢复）。唯一副作用：这一分钟里如果正好在发回复，可能发不出去（日志里会留下一条 `处理失败`）。
+
 **后台常驻**：见 6.4；Linux/macOS 用 `nohup node bridge.mjs &` 或 systemd。
 
 ---
