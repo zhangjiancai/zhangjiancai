@@ -1,0 +1,8 @@
+# 备份仓库的行尾约定。core.autocrlf=true 会在 Windows 上把文本文件检出为 CRLF，
+# 这里把「Windows 脚本」和「npm 生成的文件」说清楚，避免每次同步都报
+# "LF will be replaced by CRLF the next time Git touches it"。
+* text=auto
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+*.cmd text eol=crlf
+package-lock.json text eol=lf

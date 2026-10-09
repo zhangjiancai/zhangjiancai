@@ -32,6 +32,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
+# git 输出是 UTF-8；不设置的话中文提交信息在控制台会显示成乱码（提交内容本身没问题）。
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
+
 if (-not $Repo) {
   $localRepoFile = Join-Path $root '.backup-repo'
   if (Test-Path -LiteralPath $localRepoFile) {
@@ -60,6 +65,7 @@ $files = [ordered]@{
   'package-lock.json'       = 'package-lock.json'
   'lean.patch.yml'          = 'lean.patch.yml'
   '.env.example'            = '.env.example'
+  '.gitattributes'          = '.gitattributes'
   'README.md'               = 'README.md'
   'COMMANDS.md'             = 'COMMANDS.md'
   'AGENTS.md'               = 'AGENTS.md'
