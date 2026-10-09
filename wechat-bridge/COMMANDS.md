@@ -25,8 +25,8 @@
 | 回复分片 | 1200 字/条 | `WECHAT_MAX_CHARS` |
 | 回复脚注 | token 消耗 **开**、预处理判定 **开** | `WECHAT_TOKEN_FOOTER=0` / `WECHAT_PRE_NOTIFY=0` |
 | 授权 | 已配对 **1** 个微信用户（不设 `WECHAT_ALLOW` 时第一个发消息的人自动配对） | `.env` 的 `WECHAT_ALLOW` |
-| 计划任务 | `DSH-WeChat-Bridge`：登录即启 + 每 30 分钟看护；`IgnoreNew`；无运行时长上限；失败重试 999 次 / 每 1 分钟；RunLevel=Limited | `install-task.ps1` |
-| 日志 | `.state/logs/bridge.log`，超过 5 MB 轮转到 `.log.1` | `run-bridge.ps1 -MaxLogBytes` |
+| 计划任务 | `DSH-WeChat-Bridge`：登录即启 + 每 30 分钟看护；`IgnoreNew`；无运行时长上限；失败重试 999 次 / 每 1 分钟；RunLevel=Limited；动作是仓库外副本 `%LOCALAPPDATA%\DSH\wechat-bridge\run-bridge-hidden.vbs`（`wscript //B`） | `install-task.ps1` |
+| 日志 | `.state/logs/bridge.log`（`launcher:` 前缀来自启动器，`===== ERROR` 来自 `run-bridge.ps1`），超过 5 MB 轮转到 `.log.1` | `run-bridge.ps1 -MaxLogBytes` |
 | `.env` 里设了什么 | 只有 `DEEPSEEK_API_KEY`，其余全部走代码默认值 | — |
 
 没列到的项见 README 第 7 节（完整变量表，含每一项的默认值）。想核当前值：`/status` 看档位与权限，`/pre` 看判定器与阈值。
@@ -106,7 +106,8 @@
 | `wechat-bridge/` | `node send-media.mjs --text "一句话"` | 旁路推纯文字 |
 | `wechat-bridge/` | `node test-preprocess.mjs [--scores]` | 预处理自检与阈值标定（9 条中文用例） |
 | `wechat-bridge/` | `pwsh -File install-task.ps1` | 注册 / 更新并重启计划任务（**改代码或改配置后跑这个**） |
-| `wechat-bridge/` | `pwsh -File install-task.ps1 -Status` | 看任务状态与桥接进程 |
+| `wechat-bridge/` | `pwsh -File install-task.ps1 -Status` | 看任务状态、动作、日志路径与桥接进程 |
+| `wechat-bridge/` | `pwsh -File install-task.ps1 -Log` | 打印日志尾部 40 行 |
 | `wechat-bridge/` | `pwsh -File install-task.ps1 -Stop` | 停桥接 |
 | `wechat-bridge/` | `pwsh -File install-task.ps1 -Uninstall` | 停止并删除任务 |
 | `wechat-bridge/` | `pwsh -File sync-backup.ps1` | 把可公开文件同步到备份仓库并推送 |

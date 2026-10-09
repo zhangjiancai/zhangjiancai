@@ -126,9 +126,9 @@
 | `ilink-media.mjs` | 媒体协议：加密、上传 CDN、组装 item | 253 行 |
 | `send-media.mjs` | 命令行旁路推送（复用登录态，不重启桥接） | 106 行 |
 | `test-preprocess.mjs` | 预处理自检 / 阈值标定（9 条中文用例） | 94 行 |
-| `run-bridge.ps1` | 拉起桥接 + 日志按 5 MB 轮转 | — |
-| `run-bridge-hidden.vbs` | 用 wscript 无窗口启动 `run-bridge.ps1` | — |
-| `install-task.ps1` | 注册/更新/停止/卸载计划任务 | — |
+| `run-bridge.ps1` | 拉起桥接 + 日志按 5 MB 轮转；任何失败写 `===== ERROR` | — |
+| `run-bridge-hidden.vbs` | 用 wscript 无窗口启动 `run-bridge.ps1`；写 `launcher:` 日志，可接一个 bridge 根参数 | — |
+| `install-task.ps1` | 注册/更新/停止/卸载计划任务；把启动器副本放到仓库外的 `%LOCALAPPDATA%\DSH\wechat-bridge\` | — |
 | `sync-backup.ps1` | 把可公开文件同步到 GitHub 备份仓库（白名单 + 密钥扫描） | — |
 | `COMMANDS.md` | 指令与操作速查：微信指令 / 本机脚本 / 环境变量开关 | — |
 | `AGENTS.md` | 本目录约定：改指令要同步哪三处、密钥不外传 | — |
@@ -319,6 +319,7 @@ wechat-bridge/.state/
 | 21 | 10-03 10:30 | 切到最新模型 `deepseek-flash`；把图像专用通道断个使能（功能保留，默认不启用） | `DSH_MODEL` 默认改 `deepseek-flash`；`subagent_vision` 改由 `DSH_VISION_CHANNEL` 控制、默认关；profile 不再覆盖模型目录（默认目录里 `deepseek-flash` 自带 image 输入） | `bridge.mjs:43`；`~/.dsh/profiles/sdk/cordis.patch.yml` |
 | 22 | 10-03 10:53 | 我发送这个 `/pre [off]` 指令，怎么回复这个；把模型的配置项都改了，改为最新的 | `/pre`、`/profile` 的参数先去方括号再判定，认不出的参数当场回用法——原来整条漏给模型，它只能回「我没有 /pre 这个指令」；模型默认值清到最新的 `deepseek-flash`（仓库里剩下的几处见第 21 条之外：`subagent-dsh-sdk`、`web-search-deepseek`、TS SDK 客户端、Python SDK、`acp-app` bundle） | `bridge.mjs:104-110`、`859-891`、`893-920` |
 | 23 | 10-03 11:21 | 列出全部的工作区，然后切换到 wechat-todo 这个工作区 | `/ws` 改成列出 DSH 已登记的全部工作区（读 `$DSH_HOME/storages/workspace.json`；当前工作区标 `*`、目录不存在的标出来）；`/ws <名称>` 支持按工作区名切换（已存在的路径优先，再查名称）；新增 `--check-workspaces` 自检。**切换动作只能由桥接执行**——Agent 在自己的回合里改不了桥接的工作区映射，所以清单在回合内给，切换要发指令 | `bridge.mjs:48-51`、`625-645`、`781-846`、`1143-1153` |
+| 24 | 10-10 01:25 | 为什么重启之后，微信 bot 没有重新挂起；一般报错、崩溃务必要抛出日志，可溯源 | 定位：10-08 的 `git stash -u` 把未跟踪的整个 `wechat-bridge/` 卷进 stash，10-09 重启后任务动作指向已不存在的 `run-bridge-hidden.vbs`，wscript 弹模态框把实例卡在 Running，`IgnoreNew` 吞掉之后每次看护，于是再也没起来。修复：把任务目标移出 git 工作区（`%LOCALAPPDATA%\DSH\wechat-bridge\` 的启动器副本）+ `//B` 批处理模式；启动器、`run-bridge.ps1`、`bridge.mjs` 全部补上失败日志（`launcher:` / `===== ERROR` / 未捕获异常带栈退出） | `run-bridge-hidden.vbs`、`run-bridge.ps1`、`install-task.ps1`、`bridge.mjs` |
 
 ### 3.1 三个被实测推翻的设计
 
@@ -525,6 +526,10 @@ node bridge.mjs --check-workspaces wechat-todo  # 顺带打印名称解析到哪
 
 `run-bridge.ps1` 带日志拉起桥接（输出按 5 MB 轮转到 `.state/logs/bridge.log`），`install-task.ps1` 注册计划任务 `DSH-WeChat-Bridge`：当前用户登录时自动启动、隐藏窗口、失败自动重试、每 30 分钟看护一次、无运行时长上限、不会起重复实例。
 
+任务的动作是 `wscript.exe //B` 跑 `%LOCALAPPDATA%\DSH\wechat-bridge\run-bridge-hidden.vbs`——仓库里那份的副本，`install-task.ps1` 每次注册时刷新——并把本仓库的 `wechat-bridge\` 作为参数传给它。任务目标因此不在 git 工作区内：`git stash -u`、`git clean` 之类的操作不可能再把它变成「指向一个不存在的文件」。
+
+每一次启动、失败、退出都会落进 `.state/logs/bridge.log`：启动器写 `launcher: start (root=…)`、`launcher: ERROR …`、`launcher: run-bridge.ps1 exited rc=…`，`run-bridge.ps1` 写 `===== start / exit / ERROR`，`bridge.mjs` 的未捕获异常与未处理拒绝也会带栈退出并留下 `===== exit`。
+
 ```powershell
 pwsh -File wechat-bridge/install-task.ps1            # 注册并启动（重复执行 = 更新配置并重启）
 pwsh -File wechat-bridge/install-task.ps1 -Status    # 查看任务状态与桥接进程
@@ -538,11 +543,15 @@ pwsh -File wechat-bridge/install-task.ps1 -Uninstall # 停止并删除任务
 Get-Content .\wechat-bridge\.state\logs\bridge.log -Wait -Tail 20
 ```
 
-**为什么任务的动作是 `wscript.exe run-bridge-hidden.vbs`，而不是直接 `pwsh -WindowStyle Hidden`**：Windows 11 默认把控制台窗口交给 Windows Terminal 托管，托管出来的窗口不受 `-WindowStyle Hidden` 控制，会一直挂在桌面上；关掉它还会连带杀死桥接（任务退出码 `0xC000013A` = 控制台关闭），然后看护逻辑又把任务拉起来，于是「黑窗口关了又出现」。`wscript` 是 GUI 子系统进程，用 `WScript.Shell.Run(cmd, 0, True)` 从一开始就以 SW_HIDE 启动 pwsh，不再出现任何窗口；pwsh 的控制台依旧存在（隐藏），node/dsh/命令子进程都继承它，所以 Agent 干活时也不会弹窗。
+**为什么任务的动作是 `wscript.exe //B run-bridge-hidden.vbs`（仓库外那份副本），而不是直接 `pwsh -WindowStyle Hidden`**：Windows 11 默认把控制台窗口交给 Windows Terminal 托管，托管出来的窗口不受 `-WindowStyle Hidden` 控制，会一直挂在桌面上；关掉它还会连带杀死桥接（任务退出码 `0xC000013A` = 控制台关闭），然后看护逻辑又把任务拉起来，于是「黑窗口关了又出现」。`wscript` 是 GUI 子系统进程，用 `WScript.Shell.Run(cmd, 0, True)` 从一开始就以 SW_HIDE 启动 pwsh，不再出现任何窗口；pwsh 的控制台依旧存在（隐藏），node/dsh/命令子进程都继承它，所以 Agent 干活时也不会弹窗。
 
 如果还是看到黑窗口，把任务「常规」里改成「不管用户是否登录都要运行」（进程跑在会话 0，物理上没有桌面可显示窗口）——那一步需要管理员权限，且要保存账户密码。
 
 注意：改动 `.env`（例如换 API key）后要重新执行一次 `install-task.ps1` 重启进程才会生效；任务只在你的用户登录时运行（注册不需要管理员、不需要密码），注销即停止。
+
+`//B` 是 wscript 的批处理模式：脚本缺失时立刻以非零码退出，而不是弹出模态对话框并把任务实例卡在 Running（`IgnoreNew` 会把之后的每次看护全部吞掉——2026-10-09 重启后没自启就是这个原因）。
+
+**失败怎么溯源**：`install-task.ps1 -Status` 给出任务状态、动作、日志路径和桥接 pid；`install-task.ps1 -Log` 打印日志尾部 40 行；任务层面（触发器何时开跑、动作返回码）看 Windows 事件日志 `Microsoft-Windows-TaskScheduler/Operational`。
 
 ### 6.5 改代码后怎么生效
 

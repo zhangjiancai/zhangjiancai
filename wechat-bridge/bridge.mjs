@@ -1194,6 +1194,17 @@ async function main() {
   await monitor(state, account)
 }
 
+// 崩溃留痕：未捕获异常与未处理的 Promise 拒绝显式写进日志（stdout/stderr 由 run-bridge.ps1
+// 汇总到 bridge.log），并以非零码退出，让计划任务的看门狗在下一个周期把它拉起来。
+process.on('uncaughtException', error => {
+  log('未捕获异常（进程退出）：' + String(error && error.stack ? error.stack : error))
+  process.exit(1)
+})
+process.on('unhandledRejection', reason => {
+  log('未处理的 Promise 拒绝（进程退出）：' + String(reason && reason.stack ? reason.stack : reason))
+  process.exit(1)
+})
+
 main().catch(err => {
   log('启动失败：' + String(err && err.stack ? err.stack : err))
   process.exit(1)

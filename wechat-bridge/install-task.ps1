@@ -6,10 +6,17 @@
   pwsh -File install-task.ps1 -Status      # show task state and bridge process
   pwsh -File install-task.ps1 -Stop        # stop the running bridge
   pwsh -File install-task.ps1 -Uninstall   # stop and delete the task
+  pwsh -File install-task.ps1 -Log         # tail .state/logs/bridge.log (launcher + bridge)
+
+  The task runs a copy of run-bridge-hidden.vbs kept in %LOCALAPPDATA%\DSH\wechat-bridge,
+  so git operations in this repository can never leave the task pointing at a missing file.
+  That copy receives this repository root as its argument; the launcher and run-bridge.ps1
+  append every outcome (start, missing files, errors, exit code) to .state/logs/bridge.log.
 #>[CmdletBinding()]
 param(
   [switch]$Uninstall,
   [switch]$Status,
+  [switch]$Log,
   [switch]$Stop,
   [switch]$NoStart,
   [switch]$Elevated
@@ -34,6 +41,8 @@ function Show-TaskStatus {
   Write-Output "state     : $($task.State)"
   Write-Output "last run  : $($info.LastRunTime)  result=$($info.LastTaskResult)"
   Write-Output "next run  : $($info.NextRunTime)"
+  Write-Output "launcher  : $($task.Actions[0].Arguments)"
+  Write-Output "log       : $root\.state\logs\bridge.log"
   $running = @(Get-BridgeProcess)
   if ($running.Count -gt 0) {
     Write-Output ("bridge    : " + (($running | ForEach-Object { "pid=$($_.ProcessId) since=$($_.CreationDate)" }) -join '; '))
@@ -43,6 +52,16 @@ function Show-TaskStatus {
 }
 
 if ($Status) { Show-TaskStatus; return }
+
+if ($Log) {
+  $logFile = Join-Path $root '.state\logs\bridge.log'
+  if (Test-Path -LiteralPath $logFile) {
+    Get-Content -LiteralPath $logFile -Tail 40
+  } else {
+    Write-Output "no log yet: $logFile"
+  }
+  return
+}
 
 if ($Uninstall) {
   if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -79,9 +98,18 @@ if (-not (Test-Path -LiteralPath $vbs)) { throw "hidden launcher not found: $vbs
 $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
 if (-not (Test-Path -LiteralPath $wscript)) { throw "wscript.exe not found: $wscript" }
 
+# The task must not point at a file inside the git worktree: on 2026-10-08 a `git stash -u`
+# swept wechat-bridge\run-bridge-hidden.vbs away, so after the next reboot wscript had
+# nothing to run and the bridge never came back. Keep a copy outside the repository and
+# register the task against that copy; it takes the repository root as its argument.
+$stableDir = Join-Path $env:LOCALAPPDATA 'DSH\wechat-bridge'
+New-Item -ItemType Directory -Force -Path $stableDir | Out-Null
+$stableVbs = Join-Path $stableDir 'run-bridge-hidden.vbs'
+Copy-Item -LiteralPath $vbs -Destination $stableVbs -Force
+
 $userId = "$env:USERDOMAIN\$env:USERNAME"
 $action = New-ScheduledTaskAction -Execute $wscript `
-  -Argument ('//nologo "{0}"' -f $vbs) `
+  -Argument ('//B //nologo "{0}" "{1}"' -f $stableVbs, $root) `
   -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
 # watchdog: ask again every 30 minutes; MultipleInstances=IgnoreNew keeps it single
