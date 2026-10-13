@@ -3,16 +3,21 @@ package com.appanalyzer.ui.screens
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.appanalyzer.service.PreferencesManager
@@ -21,27 +26,34 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.appanalyzer.ui.icons.AppIcons
+import com.appanalyzer.ui.util.LocalCompactModeController
 import androidx.compose.material.icons.filled.*
 
 /**
- * API Key 设置弹窗 + 联网检测
+ * 设置弹窗：显示偏好 + DeepSeek API Key + 关于入口。
+ *
+ * 这次重做了三处：
+ * 1. **配色改用主题语义色**。原来网络状态卡写死 Color(0xFFE8F5E9) 这种淡绿/淡红，
+ *    深色模式下就是两块刺眼的亮斑，而且和整体色系完全不搭。
+ * 2. **加了「关于」入口**。用户要求把它从顶栏挪进设置里。
+ * 3. **可滚动**。小屏幕上内容会超出对话框高度。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsDialog(
     onDismiss: () -> Unit,
-    onSaved: () -> Unit
+    onSaved: () -> Unit,
+    onOpenAbout: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefsManager = remember { PreferencesManager(context) }
+    val compact = LocalCompactModeController.current
 
     var apiKey by remember { mutableStateOf(prefsManager.getApiKey()) }
     var testing by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
     var showKey by remember { mutableStateOf(false) }
-
-    // 联网状态。原来有两个 LaunchedEffect(Unit)：一个循环轮询、一个做初始检测，
-    // 于是首帧会并发检测两次，逻辑重复。
     var isNetworkAvailable by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -51,55 +63,74 @@ fun SettingsDialog(
         }
     }
 
-    // API Key 格式校验提示
     val keyFormatWarning = remember(apiKey) {
         val trimmed = apiKey.trim()
         when {
             trimmed.isEmpty() -> null
-            !trimmed.startsWith("sk-") -> "⚠️ API Key 通常以 sk- 开头，请确认格式正确"
-            trimmed.length < 20 -> "⚠️ API Key 似乎太短，请检查是否完整"
+            !trimmed.startsWith("sk-") -> "Key 通常以 sk- 开头，请确认格式"
+            trimmed.length < 20 -> "Key 似乎太短，请检查是否完整"
             else -> null
         }
     }
 
+    val cs = MaterialTheme.colorScheme
+
     AlertDialog(
         onDismissRequest = { if (!testing) onDismiss() },
-        title = { Text("DeepSeek API 设置", fontWeight = FontWeight.Bold) },
+        title = { Text("设置", fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1) },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                // 联网状态
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isNetworkAvailable) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // ===== 显示 =====
+                SectionLabel("显示")
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            if (isNetworkAvailable) AppIcons.Wifi else AppIcons.WifiOff,
-                            contentDescription = null,
-                            tint = if (isNetworkAvailable) Color(0xFF4CAF50) else Color(0xFFF44336)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("全局紧凑", fontSize = 13.sp, maxLines = 1)
                         Text(
-                            if (isNetworkAvailable) "网络已连接" else "⚠️ 无网络连接",
-                            fontSize = 13.sp
+                            "所有页面整体缩小，一屏能多看约 18% 内容",
+                            fontSize = 10.sp, color = cs.onSurfaceVariant, maxLines = 2
                         )
                     }
+                    Switch(
+                        checked = compact.enabled,
+                        onCheckedChange = { compact.setEnabled(it) }
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(Modifier.padding(vertical = 10.dp))
 
-                Text("API Key", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(8.dp))
+                // ===== DeepSeek =====
+                SectionLabel("DeepSeek API")
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (isNetworkAvailable) AppIcons.Wifi else AppIcons.WifiOff,
+                        contentDescription = null,
+                        tint = if (isNetworkAvailable) cs.primary else cs.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (isNetworkAvailable) "网络已连接" else "无网络连接",
+                        fontSize = 12.sp,
+                        color = if (isNetworkAvailable) cs.onSurfaceVariant else cs.error,
+                        maxLines = 1
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it; testResult = null },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("sk-...") },
+                    placeholder = { Text("sk-...", fontSize = 13.sp) },
                     visualTransformation = if (showKey)
                         androidx.compose.ui.text.input.VisualTransformation.None
                     else PasswordVisualTransformation(),
@@ -107,53 +138,74 @@ fun SettingsDialog(
                         IconButton(onClick = { showKey = !showKey }) {
                             Icon(
                                 if (showKey) AppIcons.VisibilityOff else AppIcons.Visibility,
-                                contentDescription = null
+                                contentDescription = if (showKey) "隐藏" else "显示",
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     },
-                    singleLine = true
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 13.sp)
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // API Key 格式警告
                 if (keyFormatWarning != null) {
-                    Text(
-                        keyFormatWarning,
-                        fontSize = 11.sp,
-                        color = Color(0xFFE65100)
-                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(keyFormatWarning, fontSize = 10.sp, color = cs.error, maxLines = 1)
                 }
 
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    "从 DeepSeek 控制台获取: platform.deepseek.com",
-                    fontSize = 11.sp, color = Color.Gray
+                    "在 platform.deepseek.com 获取。只存在本机，不会编译进 APK。",
+                    fontSize = 10.sp, color = cs.onSurfaceVariant
                 )
 
-                val result = testResult
-                if (result != null) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    val isSuccess = result.startsWith("✅")
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSuccess) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
-                        )
+                if (testing) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("正在测试连接…", fontSize = 12.sp, maxLines = 1)
+                    }
+                } else testResult?.let { result ->
+                    Spacer(Modifier.height(10.dp))
+                    val ok = result.startsWith("✅")
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (ok) cs.primaryContainer else cs.errorContainer,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            // 用局部变量代替 testResult!!：那个 !! 在提示消失的瞬间会崩
                             result,
-                            modifier = Modifier.padding(12.dp),
-                            fontSize = 13.sp,
-                            color = if (isSuccess) Color(0xFF2E7D32) else Color(0xFFC62828)
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            fontSize = 11.sp,
+                            color = if (ok) cs.onPrimaryContainer else cs.onErrorContainer
                         )
                     }
-                } else if (testing) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("正在测试连接...", fontSize = 13.sp)
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 10.dp))
+
+                // ===== 其他 =====
+                SectionLabel("其他")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onDismiss(); onOpenAbout() }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Info, null, tint = cs.primary, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("关于", fontSize = 13.sp, maxLines = 1)
+                        Text(
+                            "版本、功能说明与已知限制（README 全文）",
+                            fontSize = 10.sp, color = cs.onSurfaceVariant, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
+                    Icon(Icons.Default.KeyboardArrowRight, null, tint = cs.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp))
                 }
             }
         },
@@ -165,9 +217,7 @@ fun SettingsDialog(
                             testing = true
                             testResult = null
                             val keyToTest = apiKey.trim()
-                            // 用 keyOverride 测试，不再偷偷把密钥写进本地存储。
-                            // 之前那句 PreferencesManager(context).apply { setApiKey(apiKey) }
-                            // 意味着「测试连接」是个会落盘的副作用：点完再点取消，密钥已经存进去了。
+                            // 用 keyOverride 测试，不偷偷落盘
                             val outcome = withContext(Dispatchers.IO) {
                                 com.appanalyzer.service.DeepSeekService(prefsManager, keyToTest)
                                     .testConnection()
@@ -176,29 +226,37 @@ fun SettingsDialog(
                                         onFailure = { "❌ 失败: ${it.message}" }
                                     )
                             }
-                            // 在主线程写 Compose 状态
                             testResult = outcome
                             testing = false
                         }
                     },
                     enabled = apiKey.isNotBlank() && !testing
-                ) {
-                    Text("测试连接")
-                }
+                ) { Text("测试连接", fontSize = 13.sp, maxLines = 1) }
+
                 Button(
                     onClick = {
                         prefsManager.setApiKey(apiKey)
                         onSaved()
                     },
                     enabled = !testing
-                ) {
-                    Text("保存")
-                }
+                ) { Text("保存", fontSize = 13.sp, maxLines = 1) }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text("取消", fontSize = 13.sp, maxLines = 1) }
         }
+    )
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        maxLines = 1,
+        modifier = Modifier.padding(bottom = 4.dp)
     )
 }
 

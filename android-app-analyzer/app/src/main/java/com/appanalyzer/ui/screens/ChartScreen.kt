@@ -1,18 +1,21 @@
 package com.appanalyzer.ui.screens
 
-import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,439 +23,704 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.appanalyzer.data.model.AppInfo
+import com.appanalyzer.ui.components.MetricTile
+import com.appanalyzer.ui.components.RankBadge
+import com.appanalyzer.ui.components.SegmentedToggle
+import com.appanalyzer.ui.icons.AppIcons
+import com.appanalyzer.ui.theme.ChartPalette
 import com.appanalyzer.ui.util.SizeUnit
 import com.appanalyzer.ui.util.formatFileSizeOrUnknown
 import java.util.Locale
-import com.appanalyzer.ui.icons.AppIcons
-import androidx.compose.material.icons.filled.*
+import kotlin.math.roundToInt
+
+/**
+ * 图表页。
+ *
+ * ## 这一版重做了什么
+ *
+ * 上一版的问题：控制栏默认折叠（要先展开才知道有单位可选）、柱子是纯色直角块、
+ * 排名前三用金黄/银灰/铜色三个硬编码色、点击只能弹 Toast（看完就没了）、
+ * 折线图的轴标签是写死的灰色、坐标轴画了两条又粗又直的深灰线。
+ *
+ * 这一版：
+ *
+ * 1. **控制栏不再折叠**：把 FilterChip（最小高度 32dp、内边距很宽）换成自绘的
+ *    分段选择器（每段 5dp 纵向内边距），三行加起来约 100dp，比原来"折叠起来只剩标题"
+ *    反而更省空间，而且功能一眼可见。
+ * 2. **选中态**：点任意条目/曲线任意位置 → 卡片顶部固定显示这个应用的尺寸明细。
+ *    原来的 Toast 只能看几秒，现在信息常驻（Toast 的内容也一并搬过来了）。
+ * 3. **图形高级化**：圆角柱 + 横向渐变、背景轨道弱化、网格线降到 outline 的 20%~30%、
+ *    折线用面积渐变填充 + 高亮竖线 + 环形游标。
+ * 4. **颜色全部走语义色**：金/银/铜换成"第 1 名实心强调色，其余同色相弱化"，
+ *    轴标签用 onSurfaceVariant，深色模式下不会出现灰字糊在暗底上。
+ */
+
+private enum class ChartKind { BAR, LINE }
+
+private val AppInfo.totalSize: Long get() = appSize + cacheSize + dataSize
+
+/** 轴标签：数值大就少留小数，避免"1024.0MB"这种又长又没信息量的刻度。 */
+private fun formatAxisValue(value: Float, unit: SizeUnit): String = when {
+    value >= 100f -> String.format(Locale.US, "%.0f%s", value, unit.label)
+    value >= 10f -> String.format(Locale.US, "%.1f%s", value, unit.label)
+    else -> String.format(Locale.US, "%.2f%s", value, unit.label)
+}
+
+/** 把点击/拖动的横坐标换算成最近的数据点下标。n >= 2 由调用方保证。 */
+private fun nearestIndex(
+    x: Float,
+    widthPx: Int,
+    plotLeftPx: Float,
+    plotRightPx: Float,
+    n: Int
+): Int {
+    val plotWidth = widthPx - plotLeftPx - plotRightPx
+    if (plotWidth <= 1f || n < 2) return 0
+    val ratio = ((x - plotLeftPx) / plotWidth).coerceIn(0f, 1f)
+    return (ratio * (n - 1)).roundToInt().coerceIn(0, n - 1)
+}
 
 @Composable
 fun ChartScreen(apps: List<AppInfo>) {
-    if (apps.isEmpty()) {
-        // 以前这里显示的是一个永不停止的 CircularProgressIndicator：
-        // 「没有数据」被伪装成「正在加载」，用户会一直等下去。
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(AppIcons.BarChart, null, modifier = Modifier.size(48.dp), tint = Color.Gray)
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("暂无数据", fontSize = 16.sp, color = Color.Gray)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("请先在「列表」页加载应用，或点击右上角刷新", fontSize = 12.sp, color = Color.Gray)
-            }
-        }
+    // 按总大小降序。过滤掉 totalSize <= 0 的：它们在柱状图里没有长度，
+    // 画出来只是一条看不见的缝，却会占掉一个排名。
+    val sortedApps = remember(apps) {
+        apps.filter { it.totalSize > 0 }.sortedByDescending { it.totalSize }
+    }
+
+    if (sortedApps.isEmpty()) {
+        ChartEmptyState()
         return
     }
 
-    // 按总大小降序排列
-    val sortedApps = remember(apps) {
-        apps.filter { it.totalSize > 0 }
-            .sortedByDescending { it.totalSize }
-    }
-
-    // 图表类型：柱状图 vs L型折线图
-    var chartType by remember { mutableStateOf(false) }
-
-    // 单位选择（两种图表通用）
+    var kind by remember { mutableStateOf(ChartKind.BAR) }
     var selectedUnit by remember { mutableStateOf(SizeUnit.MB) }
-
-    // 显示的条目数（null表示全部）
     var showCount by remember { mutableStateOf<Int?>(50) }
-
-    // 控制栏折叠状态
-    var controlsExpanded by remember { mutableStateOf(false) }
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
 
     val displayApps = remember(sortedApps, showCount) {
         val count = showCount
         if (count == null) sortedApps else sortedApps.take(count)
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // 控制栏头部（可点击折叠）
-        Card(
-            modifier = Modifier.fillMaxWidth().padding(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                // 标题行 + 折叠按钮
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { controlsExpanded = !controlsExpanded }
-                ) {
-                    @Suppress("DEPRECATION")
-                    Icon(
-                        if (chartType) AppIcons.ShowChart else AppIcons.BarChart,
-                        contentDescription = null, tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        if (chartType) "L型曲线（应用大小分布）" else "应用大小排行榜",
-                        fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f)
-                    )
-                    // 以前用的是未经过滤的 apps.size，而图上画的只有 totalSize>0 的部分，
-                    // 于是标题上的数字和实际柱子数量对不上。
-                    Text("共${sortedApps.size}个", fontSize = 12.sp, color = Color.Gray)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        if (controlsExpanded) AppIcons.ExpandLess else AppIcons.ExpandMore,
-                        contentDescription = if (controlsExpanded) "收起" else "展开",
-                        tint = Color.Gray
-                    )
-                }
+    // 切换单位/数量后原来的选中下标可能越界，这里统一收敛掉
+    val selected = selectedIndex?.takeIf { it in displayApps.indices }
+    val maxValue = (displayApps.maxOfOrNull { it.totalSize } ?: 1L).coerceAtLeast(1L).toFloat()
 
-                // 可折叠控制栏
-                AnimatedVisibility(
-                    visible = controlsExpanded,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    Column {
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // 图表类型切换 + 单位选择（同一行）
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // 柱状 / 折线 切换
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            ) {
-                                Row(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-                                    FilterChip(
-                                        selected = !chartType,
-                                        onClick = { chartType = false },
-                                        label = { Text("柱状", fontSize = 12.sp) },
-                                        modifier = Modifier.height(30.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                    FilterChip(
-                                        selected = chartType,
-                                        onClick = { chartType = true },
-                                        label = { Text("折线", fontSize = 12.sp) },
-                                        modifier = Modifier.height(30.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.weight(1f))
-
-                            // 单位选择（两种模式都显示）
-                            Text("单位:", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            SizeUnit.values().forEach { unit ->
-                                FilterChip(
-                                    selected = selectedUnit == unit,
-                                    onClick = { selectedUnit = unit },
-                                    label = { Text(unit.label, fontSize = 11.sp) },
-                                    modifier = Modifier.height(28.dp)
-                                )
-                            }
-                        }
-
-                        // 柱状图模式下才显示数量控制
-                        if (!chartType) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text("显示:", fontSize = 13.sp)
-                                listOf(10, 20, 50, null).forEach { count ->
-                                    FilterChip(
-                                        selected = showCount == count,
-                                        onClick = { showCount = count },
-                                        label = { Text(if (count == null) "全部" else "Top${count}", fontSize = 12.sp) },
-                                        modifier = Modifier.height(28.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 图表区域
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        ChartControlCard(
+            kind = kind,
+            onKindChange = { kind = it },
+            unit = selectedUnit,
+            onUnitChange = { selectedUnit = it },
+            showCount = showCount,
+            onShowCountChange = { showCount = it },
+            chartedCount = sortedApps.size
+        )
+        Spacer(Modifier.height(8.dp))
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .border(
+                    width = 1.dp,
+                    color = ChartPalette.hairline(),
+                    shape = RoundedCornerShape(14.dp)
+                ),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
-            if (chartType) {
-                // L型折线图（应用大小分布曲线）
-                Box(modifier = Modifier.fillMaxSize().padding(4.dp)) {
-                    LCurveChart(apps = displayApps, unit = selectedUnit)
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (kind == ChartKind.BAR) {
+                    BarDetailStrip(app = selected?.let { displayApps[it] }, unit = selectedUnit)
+                } else {
+                    LineDetailStrip(apps = displayApps, unit = selectedUnit, selectedIndex = selected)
                 }
-            } else {
-                // 水平柱状图 - 使用 LazyColumn 避免 OOM
-                BarChartView(
-                    apps = displayApps,
-                    selectedUnit = selectedUnit
-                )
-            }
-        }
-    }
-}
-
-private val AppInfo.totalSize: Long get() = appSize + cacheSize + dataSize
-
-@Composable
-fun BarChartView(
-    apps: List<AppInfo>,
-    selectedUnit: SizeUnit
-) {
-    val context = LocalContext.current
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
-    // 取真实最大值。以前写的是 apps.firstOrNull()?.totalSize —— 隐含「调用方一定
-    // 按大小降序排好」这个前提，一旦顺序变了 ratio 就 >1，再被 coerceIn 悄悄夹住，
-    // 图形看着挺正常，数据其实是错的。
-    val maxValue = (apps.maxOfOrNull { it.totalSize } ?: 1L).coerceAtLeast(1L).toFloat()
-
-    // 使用 LazyColumn + itemsIndexed 代替 verticalScroll + forEach，避免大量 app 时的 OOM
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 8.dp)
-    ) {
-        itemsIndexed(apps) { index, app ->
-            val ratio = app.totalSize.toFloat() / maxValue
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(40.dp)
-                    .clickable {
-                        // 没有权限时缓存/数据显示「—」，不显示 0 —— 0 会被读成
-                        // 「这个应用没有缓存」，而事实是「读不到」。
-                        val cacheText = formatFileSizeOrUnknown(app.cacheSize, app.hasSizeDetail)
-                        val dataText = formatFileSizeOrUnknown(app.dataSize, app.hasSizeDetail)
-                        Toast.makeText(
-                            context,
-                            "${app.appName}\n总大小: ${selectedUnit.format(app.totalSize)}\n" +
-                                "应用: ${selectedUnit.format(app.appSize)} | 缓存: $cacheText | 数据: $dataText",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 排名
-                Text(
-                    text = "${index + 1}",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = when (index) {
-                        0 -> Color(0xFFFFD700)
-                        1 -> Color(0xFFC0C0C0)
-                        2 -> Color(0xFFCD7F32)
-                        else -> Color.Gray
-                    },
-                    modifier = Modifier.width(24.dp)
-                )
-
-                // 柱状条
                 Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(32.dp)
-                        .padding(end = 4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(surfaceVariant)
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(ChartPalette.hairline())
+                )
+                if (kind == ChartKind.BAR) {
+                    BarRankList(
+                        apps = displayApps,
+                        maxValue = maxValue,
+                        unit = selectedUnit,
+                        selectedIndex = selected,
+                        onSelect = { selectedIndex = it }
                     )
-                    val barColor = when {
-                        app.totalSize > 1024L * 1024 * 1024 -> Color(0xFFE53935)
-                        app.totalSize > 500 * 1024 * 1024 -> Color(0xFFFB8C00)
-                        app.totalSize > 100 * 1024 * 1024 -> Color(0xFFFFC107)
-                        else -> primaryColor
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(ratio.coerceIn(0.01f, 1f))
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(barColor)
+                } else {
+                    LineCurveChart(
+                        apps = displayApps,
+                        unit = selectedUnit,
+                        selectedIndex = selected,
+                        onSelectIndex = { selectedIndex = it }
                     )
                 }
-
-                Text(
-                    text = app.appName,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.width(80.dp)
-                )
-
-                Text(
-                    text = selectedUnit.format(app.totalSize),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.width(60.dp),
-                    textAlign = TextAlign.End
-                )
             }
         }
     }
 }
 
-// ==================== L型折线图（应用大小分布，非累计） ====================
 @Composable
-fun LCurveChart(apps: List<AppInfo>, unit: SizeUnit) {
-    val context = LocalContext.current
+private fun ChartEmptyState() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                imageVector = AppIcons.BarChart,
+                contentDescription = null,
+                tint = ChartPalette.accent().copy(alpha = 0.55f),
+                modifier = Modifier.size(44.dp)
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "暂无数据",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "请先在「列表」页加载应用，或点击右上角刷新",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
 
+/**
+ * 控制栏。
+ *
+ * 三行、每行一个主题：图形类型 / 单位 / 显示数量。
+ * 每行的高度由 11sp 文字 + 5dp 纵向内边距决定，约 30dp，
+ * 全部展开也只占约 110dp —— 比"折叠起来省下的空间"划算得多。
+ */
+@Composable
+private fun ChartControlCard(
+    kind: ChartKind,
+    onKindChange: (ChartKind) -> Unit,
+    unit: SizeUnit,
+    onUnitChange: (SizeUnit) -> Unit,
+    showCount: Int?,
+    onShowCountChange: (Int?) -> Unit,
+    chartedCount: Int
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, ChartPalette.hairline(), RoundedCornerShape(14.dp)),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SegmentedToggle(
+                    options = listOf(ChartKind.BAR, ChartKind.LINE),
+                    selected = kind,
+                    onSelect = onKindChange,
+                    label = { if (it == ChartKind.BAR) "柱状" else "折线" }
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "共 " + chartedCount + " 个",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ControlLabel("单位")
+                SegmentedToggle(
+                    options = SizeUnit.values().toList(),
+                    selected = unit,
+                    onSelect = onUnitChange,
+                    label = { it.label }
+                )
+            }
+            if (kind == ChartKind.BAR) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ControlLabel("显示前")
+                    SegmentedToggle(
+                        options = listOf<Int?>(10, 20, 50, null),
+                        selected = showCount,
+                        onSelect = onShowCountChange,
+                        label = { if (it == null) "全部" else it.toString() }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ControlLabel(text: String) {
+    Text(
+        text = text,
+        fontSize = 10.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier.width(34.dp)
+    )
+}
+
+/**
+ * 明细条（柱状图模式）。
+ *
+ * 未选中时只占一行（一行提示），选中后展开成两行 —— 用 animateContentSize
+ * 让高度变化不突兀。这里就是原来那个 Toast 的内容，只是变成了常驻。
+ */
+@Composable
+private fun BarDetailStrip(app: AppInfo?, unit: SizeUnit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .padding(horizontal = 12.dp, vertical = 9.dp)
+    ) {
+        if (app == null) {
+            Text(
+                text = "点击任意条目查看尺寸明细",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+            return@Column
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = app.appName,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "总 " + unit.format(app.totalSize),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ChartPalette.accent(),
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            MetricTile(
+                label = "应用",
+                value = unit.format(app.appSize),
+                valueSize = 12.sp,
+                horizontalAlignment = Alignment.Start,
+                modifier = Modifier.weight(1f)
+            )
+            MetricTile(
+                label = "缓存",
+                value = formatFileSizeOrUnknown(app.cacheSize, app.hasSizeDetail),
+                valueSize = 12.sp,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.weight(1f)
+            )
+            MetricTile(
+                label = "数据",
+                value = formatFileSizeOrUnknown(app.dataSize, app.hasSizeDetail),
+                valueSize = 12.sp,
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+/**
+ * 明细条（折线图模式）。
+ *
+ * 常驻显示"总占用 / 最大 / 最小"（这是原来点击后 Toast 里的汇总），
+ * 选中某一点时下面那行变成该点的信息。
+ */
+@Composable
+private fun LineDetailStrip(apps: List<AppInfo>, unit: SizeUnit, selectedIndex: Int?) {
+    val total = remember(apps) { apps.sumOf { it.totalSize } }
+    val maxApp = apps.first()
+    val minApp = apps.last()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .padding(horizontal = 12.dp, vertical = 9.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            MetricTile(
+                label = "总占用",
+                value = unit.format(total),
+                valueSize = 12.sp,
+                horizontalAlignment = Alignment.Start,
+                modifier = Modifier.weight(1f)
+            )
+            MetricTile(
+                label = "最大 · " + maxApp.appName,
+                value = unit.format(maxApp.totalSize),
+                valueSize = 12.sp,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.weight(1f)
+            )
+            MetricTile(
+                label = "最小 · " + minApp.appName,
+                value = unit.format(minApp.totalSize),
+                valueSize = 12.sp,
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        val pointInfo = if (selectedIndex != null && selectedIndex in apps.indices) {
+            "第 " + (selectedIndex + 1) + " 位 · " + apps[selectedIndex].appName +
+                " · " + unit.format(apps[selectedIndex].totalSize)
+        } else {
+            "点按或拖动曲线，查看某一位对应的应用"
+        }
+        Text(
+            text = pointInfo,
+            fontSize = 10.sp,
+            color = if (selectedIndex != null) ChartPalette.accent() else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/**
+ * 横向排行榜。
+ *
+ * 用 LazyColumn 而不是 Column + forEach：应用可能有几百个，
+ * 一次性组合出来内存扛不住（这是项目里踩过的坑）。
+ */
+@Composable
+private fun BarRankList(
+    apps: List<AppInfo>,
+    maxValue: Float,
+    unit: SizeUnit,
+    selectedIndex: Int?,
+    onSelect: (Int) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        itemsIndexed(apps) { index, app ->
+            BarRankRow(
+                index = index,
+                app = app,
+                maxValue = maxValue,
+                unit = unit,
+                selected = index == selectedIndex,
+                onClick = { onSelect(index) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun BarRankRow(
+    index: Int,
+    app: AppInfo,
+    maxValue: Float,
+    unit: SizeUnit,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val fraction = (app.totalSize.toFloat() / maxValue).coerceIn(0.02f, 1f)
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(if (selected) ChartPalette.accent().copy(alpha = 0.10f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RankBadge(rank = index + 1, size = 18.dp)
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text = app.appName,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = unit.format(app.totalSize),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ChartPalette.accent(),
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(ChartPalette.track())
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(fraction)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(ChartPalette.barBrush(if (selected) 1f else 0.7f))
+            )
+        }
+    }
+}
+
+/**
+ * 折线图（应用体积分布曲线）。
+ *
+ * 几何量（左边距）在组合期就算好成 px：Canvas 画网格和手势命中判定用的是同一组数字，
+ * 否则点击位置和视觉位置会对不上。轴标签走 nativeCanvas（它天生不换行），
+ * 但字号用 sp 换算、颜色取 onSurfaceVariant —— 上一版是写死的 22f 像素 + Color.GRAY，
+ * 在高密度屏上字小得看不清，深色模式下还是一片灰。
+ */
+@Composable
+private fun LineCurveChart(
+    apps: List<AppInfo>,
+    unit: SizeUnit,
+    selectedIndex: Int?,
+    onSelectIndex: (Int?) -> Unit
+) {
     if (apps.size < 2) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("数据不足", color = Color.Gray)
+            Text(
+                text = "数据不足",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false
+            )
         }
         return
     }
 
-    // ---- 预计算：全部移到 Canvas 外部 ----
     val n = apps.size
-    // 预计算缩放后的Y值（FloatArray，避免Canvas内重复计算）
-    val scaledValues = remember(apps, unit) {
-        FloatArray(n) { idx ->
-            val bytes = apps[idx].totalSize
+    val values = remember(apps, unit) {
+        FloatArray(n) { index ->
+            val bytes = apps[index].totalSize
             when (unit) {
-                SizeUnit.B   -> bytes.toFloat()
-                SizeUnit.KB  -> bytes / 1024f
-                SizeUnit.MB  -> bytes / (1024f * 1024f)
-                SizeUnit.GB  -> bytes / (1024f * 1024f * 1024f)
+                SizeUnit.B -> bytes.toFloat()
+                SizeUnit.KB -> bytes / 1024f
+                SizeUnit.MB -> bytes / (1024f * 1024f)
+                SizeUnit.GB -> bytes / (1024f * 1024f * 1024f)
             }
         }
     }
-    // 以前是 scaledValues[0].coerceAtLeast(1f)：既假设首元素最大，又强行把轴的
-    // 上界抬到 1 —— 选「GB」做单位时应用大小都在 1 以下，整条曲线会被压到轴底。
-    // 现在取真实最大值，并且只用一个极小值兜底防止除零。
-    val maxScaled = scaledValues.maxOrNull()?.takeIf { it > 0f } ?: 1f
-
-    // Y轴刻度标签（预计算字符串）。显式 Locale.US，避免德语等环境输出 "1,5GB"。
-    val yLabelStrings = remember(maxScaled, unit) {
-        List(6) { i ->
-            val value = maxScaled * i / 5f
-            String.format(Locale.US, "%.1f%s", value, unit.label)
-        }
+    val maxValue = values.maxOrNull()?.takeIf { it > 0f } ?: 1f
+    val yLabels = remember(maxValue, unit) {
+        List(6) { index -> formatAxisValue(maxValue * index / 5f, unit) }
     }
-
-    // X轴刻度索引
     val xTicks = remember(n) {
-        listOf(0, n / 4, n / 2, n * 3 / 4, (n - 1).coerceAtLeast(0))
+        listOf(0, n / 4, n / 2, n * 3 / 4, n - 1).distinct().filter { it in 0 until n }
     }
 
-    // 点击弹窗内容（只计算一次）
-    val toastInfo = remember(apps, unit) {
-        val total = apps.sumOf { it.totalSize }
-        "📈 L型曲线\n" +
-        "总应用: ${apps.size}个\n" +
-        "总占用: ${unit.format(total)}\n" +
-        "最大: ${apps.first().appName} (${unit.format(apps.first().totalSize)})\n" +
-        "最小: ${apps.last().appName} (${unit.format(apps.last().totalSize)})"
+    val density = LocalDensity.current
+    val labelPx = with(density) { 9.sp.toPx() }
+    val paint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG) }
+    // Y 轴标签要占多宽，实测决定 —— 固定 68px 在"1024.0MB"这种刻度下会压到图里
+    val labelWidthPx = remember(yLabels, labelPx) {
+        paint.textSize = labelPx
+        yLabels.maxOf { paint.measureText(it) }
     }
+    val plotLeftPx = labelWidthPx + with(density) { 12.dp.toPx() }
+    val plotRightPx = with(density) { 10.dp.toPx() }
+    val topPadPx = with(density) { 6.dp.toPx() }
+    val bottomPadPx = with(density) { 30.dp.toPx() }
 
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val gridColor = Color.LightGray.copy(alpha = 0.35f)
-    val axisColor = Color.Gray
-    val fillColor = primaryColor.copy(alpha = 0.12f)
-    val lineColor = primaryColor
-    // 在 Canvas 外部预创建 Paint（避免 Canvas lambda 内调用 remember）
-    val yPaint = remember { android.graphics.Paint().apply { isAntiAlias = true } }
+    val gridColor = ChartPalette.grid()
+    val lineColor = ChartPalette.accent()
+    val areaBrush = ChartPalette.areaBrush()
+    val axisTextArgb = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
+    val surfaceColor = MaterialTheme.colorScheme.surface
 
-    Box(
+    Canvas(
         modifier = Modifier
             .fillMaxSize()
-            .clickable {
-                Toast.makeText(context, toastInfo, Toast.LENGTH_LONG).show()
-            }
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp)) {
-            val w = size.width
-            val h = size.height
-            val padL = 68f
-            val padR = 16f
-            val padT = 16f
-            val padB = 40f
-            val cw = w - padL - padR
-            val ch = h - padT - padB
-            if (n < 2 || cw <= 0 || ch <= 0) return@Canvas
-
-            val stepX = cw / (n - 1).toFloat().coerceAtLeast(1f)
-
-            // ---- 背景网格 ----
-            for (i in 0..5) {
-                val y = padT + ch * (1f - i / 5f)
-                drawLine(gridColor, Offset(padL, y), Offset(padL + cw, y), strokeWidth = 0.5f)
-            }
-
-            // ---- Y轴标签 ----
-            yPaint.textAlign = android.graphics.Paint.Align.RIGHT
-            yPaint.textSize = 22f
-            yPaint.color = android.graphics.Color.GRAY
-            yLabelStrings.forEachIndexed { i, label ->
-                val y = padT + ch * (1f - i / 5f)
-                drawContext.canvas.nativeCanvas.drawText(label, padL - 6f, y + 7f, yPaint)
-            }
-
-            // ---- X轴标签 ----
-            yPaint.textAlign = android.graphics.Paint.Align.CENTER
-            yPaint.textSize = 20f
-            xTicks.forEach { idx ->
-                if (idx in 0 until n) {
-                    val x = padL + idx * stepX
-                    drawContext.canvas.nativeCanvas.drawText("${idx + 1}", x, h - padB + 28f, yPaint)
+            .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 2.dp)
+            .pointerInput(n, plotLeftPx, plotRightPx) {
+                // 点按与拖动共用一个手势循环：detectTapGestures 会先消费 down，
+                // 和 detectDragGestures 放两个 pointerInput 里会互相打架。
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    onSelectIndex(
+                        nearestIndex(down.position.x, size.width, plotLeftPx, plotRightPx, n)
+                    )
+                    down.consume()
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        onSelectIndex(
+                            nearestIndex(change.position.x, size.width, plotLeftPx, plotRightPx, n)
+                        )
+                        change.consume()
+                    }
                 }
             }
+    ) {
+        val width = size.width
+        val height = size.height
+        val plotWidth = width - plotLeftPx - plotRightPx
+        val plotHeight = height - topPadPx - bottomPadPx
+        if (plotWidth <= 1f || plotHeight <= 1f) return@Canvas
+        val stepX = plotWidth / (n - 1)
 
-            // ---- 坐标轴 ----
-            drawLine(axisColor, Offset(padL, padT), Offset(padL, padT + ch), strokeWidth = 1.5f)
-            drawLine(axisColor, Offset(padL, padT + ch), Offset(padL + cw, padT + ch), strokeWidth = 1.5f)
-
-            // ---- X轴说明文字 ----
-            yPaint.textAlign = android.graphics.Paint.Align.CENTER
-            yPaint.textSize = 18f
-            drawContext.canvas.nativeCanvas.drawText(
-                "应用序号（按大小从大到小 →）",
-                padL + cw / 2f,
-                h - 2f,
-                yPaint
+        // 网格：只画横线，浓度压到 outline 的 20%~30%，绝不抢数据
+        for (i in 0..5) {
+            val y = topPadPx + plotHeight * (1f - i / 5f)
+            drawLine(
+                color = gridColor,
+                start = Offset(plotLeftPx, y),
+                end = Offset(plotLeftPx + plotWidth, y),
+                strokeWidth = 1f
             )
+        }
 
-            // ---- 折线 + 面积填充 ----
-            val ptsX = FloatArray(n) { idx -> padL + idx * stepX }
-            val ptsY = FloatArray(n) { idx -> padT + ch * (1f - scaledValues[idx] / maxScaled) }
+        // Y 轴刻度
+        paint.textAlign = android.graphics.Paint.Align.RIGHT
+        paint.textSize = labelPx
+        paint.color = axisTextArgb
+        yLabels.forEachIndexed { index, label ->
+            val y = topPadPx + plotHeight * (1f - index / 5f)
+            drawContext.canvas.nativeCanvas.drawText(
+                label,
+                plotLeftPx - 6.dp.toPx(),
+                y + labelPx * 0.36f,
+                paint
+            )
+        }
 
-            // 面积填充路径
-            val fillPath = Path()
-            fillPath.moveTo(ptsX[0], padT + ch)
-            fillPath.lineTo(ptsX[0], ptsY[0])
-            for (i in 1 until n) fillPath.lineTo(ptsX[i], ptsY[i])
-            fillPath.lineTo(ptsX[n - 1], padT + ch)
-            fillPath.close()
-            drawPath(fillPath, fillColor)
+        // X 轴刻度
+        paint.textAlign = android.graphics.Paint.Align.CENTER
+        xTicks.forEach { index ->
+            drawContext.canvas.nativeCanvas.drawText(
+                (index + 1).toString(),
+                plotLeftPx + index * stepX,
+                height - bottomPadPx + labelPx + 6.dp.toPx(),
+                paint
+            )
+        }
+        drawContext.canvas.nativeCanvas.drawText(
+            "应用序号（体积从大到小）",
+            plotLeftPx + plotWidth / 2f,
+            height - 3.dp.toPx(),
+            paint
+        )
 
-            // 折线
-            val linePath = Path()
-            linePath.moveTo(ptsX[0], ptsY[0])
-            for (i in 1 until n) linePath.lineTo(ptsX[i], ptsY[i])
-            drawPath(linePath, lineColor, style = Stroke(width = 2.5f))
+        // 面积 + 折线
+        val linePath = Path()
+        val areaPath = Path()
+        for (i in 0 until n) {
+            val x = plotLeftPx + i * stepX
+            val y = topPadPx + plotHeight * (1f - values[i] / maxValue)
+            if (i == 0) {
+                linePath.moveTo(x, y)
+                areaPath.moveTo(x, topPadPx + plotHeight)
+                areaPath.lineTo(x, y)
+            } else {
+                linePath.lineTo(x, y)
+                areaPath.lineTo(x, y)
+            }
+        }
+        areaPath.lineTo(plotLeftPx + plotWidth, topPadPx + plotHeight)
+        areaPath.close()
 
-            // 起点/终点圆点
-            drawCircle(lineColor, 4.5f, Offset(ptsX[0], ptsY[0]))
-            drawCircle(lineColor, 4.5f, Offset(ptsX[n - 1], ptsY[n - 1]))
+        drawPath(path = areaPath, brush = areaBrush)
+        drawPath(
+            path = linePath,
+            color = lineColor,
+            style = Stroke(
+                width = 2.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
+        )
+
+        // 首尾端点（首点就是最大的那个应用）
+        drawCircle(
+            color = lineColor,
+            radius = 3.dp.toPx(),
+            center = Offset(plotLeftPx, topPadPx + plotHeight * (1f - values[0] / maxValue))
+        )
+        drawCircle(
+            color = lineColor,
+            radius = 3.dp.toPx(),
+            center = Offset(
+                plotLeftPx + plotWidth,
+                topPadPx + plotHeight * (1f - values[n - 1] / maxValue)
+            )
+        )
+
+        // 选中：竖线 + 环形游标（外圈用卡片底色，深浅色下都有"挖空"的层次）
+        val selected = selectedIndex
+        if (selected != null && selected in 0 until n) {
+            val x = plotLeftPx + selected * stepX
+            val y = topPadPx + plotHeight * (1f - values[selected] / maxValue)
+            drawLine(
+                color = lineColor.copy(alpha = 0.45f),
+                start = Offset(x, topPadPx),
+                end = Offset(x, topPadPx + plotHeight),
+                strokeWidth = 1.5.dp.toPx()
+            )
+            drawCircle(color = surfaceColor, radius = 5.5.dp.toPx(), center = Offset(x, y))
+            drawCircle(color = lineColor, radius = 3.5.dp.toPx(), center = Offset(x, y))
         }
     }
 }

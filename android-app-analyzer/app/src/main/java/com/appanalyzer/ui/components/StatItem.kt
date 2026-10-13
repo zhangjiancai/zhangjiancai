@@ -14,9 +14,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -28,9 +28,19 @@ fun StatItem(label: String, value: String, icon: ImageVector) {
             .background(MaterialTheme.colorScheme.surface)
             .padding(12.dp)
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Text(label, fontSize = 12.sp, color = Color.Gray)
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.height(4.dp))
+        // 数字是主角，标签是配角。两个都禁止换行 —— 用户明确提过
+        // 「标签文字不要出现换行，特别丑」。
+        Text(
+            value, fontSize = 19.sp, fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            label, fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
     }
 }

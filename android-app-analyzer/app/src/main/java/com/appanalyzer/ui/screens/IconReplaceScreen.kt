@@ -130,8 +130,13 @@ fun IconReplaceScreen(apps: List<AppInfo>, appService: AppInfoService) {
     var trainLoss by remember { mutableStateOf(0f) }
 
     // ---- 界面偏好 ----
-    // 紧凑模式：一行只留图标 + 名称 + 大小，隐藏包名和三个操作按钮
-    var compactMode by remember { mutableStateOf(prefs.getCompactMode()) }
+    // 紧凑模式现在是**全局**的：在 MainActivity 里通过缩放 LocalDensity 统一生效，
+    // 所有页面的 dp/sp 一起缩小。这里只读控制器，不再自己持有一份状态
+    //（原来只改了图标页的行高，用户反馈「做的不全，要全局紧凑」）。
+    val compactController = com.appanalyzer.ui.util.LocalCompactModeController.current
+    val compactMode = compactController.enabled
+    /** 批量生成是否跳过已完成的 */
+    var skipDone by remember { mutableStateOf(true) }
     // 在手机里直接打包图标包 APK 的说明/执行对话框
     var showIconPackBuilder by remember { mutableStateOf(false) }
 
@@ -264,6 +269,58 @@ fun IconReplaceScreen(apps: List<AppInfo>, appService: AppInfoService) {
                 entry.copy(generatedBase64 = r.imageBase64, status = AppIconEntry.STATUS_DONE, error = null)
             is IconGenResult.Failure ->
                 entry.copy(status = AppIconEntry.STATUS_FAILED, error = r.message)
+        }
+    }
+
+    /**
+     * 批量跑一轮。
+     *
+     * @param regenerate true = 不管有没有生成过都重做（「重新生成」按钮）；
+     *                   false = 按 skipDone 决定要不要跳过已完成的（「批量生成」按钮）
+     *
+     * 以前批量生成**总是**跳过已完成的，全部完成时只丢一句「所选范围内都生成过了」，
+     * 于是生成完一轮之后想重做就没路了 —— 用户实测卡在这里。
+     */
+    suspend fun runBatch(regenerate: Boolean) {
+        if (isBatchRunning) return
+        isBatchRunning = true
+        message = null
+        val pool = if (batchScope < 0) entries else entries.take(batchScope)
+        val target = if (regenerate || !skipDone) pool
+                     else pool.filter { it.status != AppIconEntry.STATUS_DONE }
+        if (target.isEmpty()) {
+            message = when {
+                pool.isEmpty() -> "所选范围里没有应用"
+                regenerate -> "所选范围里没有可重做的应用"
+                else -> "所选范围内都生成过了。想重做就关掉「跳过已生成」，或直接点「重新生成」。"
+            }
+            isBatchRunning = false
+            return
+        }
+        try {
+            val sem = Semaphore(3)
+            var finished = 0
+            progressText = "0/" + target.size
+            val results = coroutineScope {
+                target.map { entry ->
+                    async(Dispatchers.IO) {
+                        val r = sem.withPermit { generateOne(entry) }
+                        synchronized(Unit) { finished++; progressText = finished.toString() + "/" + target.size }
+                        r
+                    }
+                }.awaitAll()
+            }
+            val byPkg = results.associateBy { it.packageName }
+            entries = entries.map { byPkg[it.packageName] ?: it }
+            val failed = results.count { it.status == AppIconEntry.STATUS_FAILED }
+            message = if (failed == 0) "完成 " + target.size + " 个"
+                      else "完成 " + target.size + " 个，其中 " + failed + " 个失败"
+        } catch (e: Exception) {
+            DebugLogger.e("批量生成失败", e)
+            message = "批量生成中断：" + e.message
+        } finally {
+            isBatchRunning = false
+            progressText = ""
         }
     }
 
@@ -478,12 +535,12 @@ fun IconReplaceScreen(apps: List<AppInfo>, appService: AppInfoService) {
                     Text("$failedCount 个失败", fontSize = 11.sp, color = Color(0xFFE53935))
                 }
                 Spacer(Modifier.weight(1f))
-                // 紧凑模式：一行只留图标 + 名称 + 大小，隐藏包名与三个操作按钮
-                Text("紧凑", fontSize = 10.sp, color = Color.Gray)
+                // 全局紧凑：整个应用所有页面一起缩小（在 MainActivity 里缩放 LocalDensity）
+                Text("紧凑", fontSize = 10.sp, color = Color.Gray, maxLines = 1)
                 Spacer(Modifier.width(4.dp))
                 Switch(
                     checked = compactMode,
-                    onCheckedChange = { compactMode = it; prefs.setCompactMode(it) },
+                    onCheckedChange = { compactController.setEnabled(it) },
                     modifier = Modifier.height(24.dp).scale(0.7f)
                 )
                 TextButton(
@@ -505,48 +562,51 @@ fun IconReplaceScreen(apps: List<AppInfo>, appService: AppInfoService) {
                 FilterChip(
                     selected = batchScope == n,
                     onClick = { batchScope = n },
-                    label = { Text(label, fontSize = 10.sp) },
+                    label = { Text(label, fontSize = 10.sp, maxLines = 1) },
                     modifier = Modifier.height(28.dp)
                 )
             }
             Spacer(Modifier.weight(1f))
+
+            // 「跳过已生成」开关。
+            // 以前批量生成**总是**跳过已完成的，全部完成时只丢一句「所选范围内都生成过了」，
+            // 生成完一轮之后想重做就没路了。关掉这个开关就是全部重做。
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("跳过已生成", fontSize = 10.sp, color = Color.Gray, maxLines = 1)
+                Spacer(Modifier.width(2.dp))
+                Switch(
+                    checked = skipDone,
+                    onCheckedChange = { skipDone = it },
+                    modifier = Modifier.height(22.dp).scale(0.65f)
+                )
+            }
+
             Button(
-                onClick = {
-                    scope.launch {
-                        isBatchRunning = true
-                        message = null
-                        val pool = if (batchScope < 0) entries else entries.take(batchScope)
-                        val target = pool.filter { it.status != AppIconEntry.STATUS_DONE }
-                        if (target.isEmpty()) {
-                            message = "所选范围内都生成过了"
-                            isBatchRunning = false
-                            return@launch
-                        }
-                        val sem = Semaphore(3)
-                        var finished = 0
-                        progressText = "0/${target.size}"
-                        val results = coroutineScope {
-                            target.map { entry ->
-                                async(Dispatchers.IO) {
-                                    val r = sem.withPermit { generateOne(entry) }
-                                    synchronized(Unit) { finished++; progressText = "$finished/${target.size}" }
-                                    r
-                                }
-                            }.awaitAll()
-                        }
-                        val byPkg = results.associateBy { it.packageName }
-                        entries = entries.map { byPkg[it.packageName] ?: it }
-                        isBatchRunning = false
-                        progressText = ""
-                    }
-                },
-                enabled = !isBatchRunning && entries.isNotEmpty() && genService.isReady()
+                onClick = { scope.launch { runBatch(regenerate = false) } },
+                enabled = !isBatchRunning && entries.isNotEmpty() && genService.isReady(),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                modifier = Modifier.height(32.dp)
             ) {
                 if (isBatchRunning) {
-                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(6.dp))
                 }
-                Text(if (isBatchRunning) "生成中 $progressText" else "批量生成", fontSize = 12.sp)
+                Text(
+                    if (isBatchRunning) "生成中 $progressText" else "批量生成",
+                    fontSize = 11.sp, maxLines = 1
+                )
+            }
+
+            // 明确的「重新生成」按钮：不管有没有生成过，范围内全部重做一遍
+            OutlinedButton(
+                onClick = { scope.launch { runBatch(regenerate = true) } },
+                enabled = !isBatchRunning && entries.isNotEmpty() && genService.isReady(),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("重新生成", fontSize = 11.sp, maxLines = 1)
             }
         }
 

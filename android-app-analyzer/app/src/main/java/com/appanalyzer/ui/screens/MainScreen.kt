@@ -179,7 +179,8 @@ fun MainScreen() {
             onSaved = {
                 showSettingsDialog = false
                 scope.launch { loadData(forceAiRefresh = true) }
-            }
+            },
+            onOpenAbout = { showAbout = true }
         )
     }
 
@@ -200,10 +201,7 @@ fun MainScreen() {
                     IconButton(onClick = { tabBarVisible = !tabBarVisible }) {
                         Icon(if (tabBarVisible) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, "隐藏tab", tint = Color.White)
                     }
-                    // 「关于」小图标：打开 README（随 APK 打包，文档只有一份）
-                    IconButton(onClick = { showAbout = true }) {
-                        Icon(Icons.Default.Info, "关于", tint = Color.White)
-                    }
+                    // 「关于」已按用户要求挪进设置界面里（顶栏不再放 Info 图标）
                     IconButton(onClick = { showSettingsDialog = true }) {
                         Icon(Icons.Default.Settings, "设置", tint = Color.White)
                     }
@@ -222,12 +220,12 @@ fun MainScreen() {
                 // 只留文字、不放图标：带图标的 Tab 行高约 72dp，去掉后约 48dp，
                 // 六个 tab 的标签都是两个字，文字本身足够区分。
                 TabRow(selectedTabIndex = selectedTab, containerColor = MaterialTheme.colorScheme.surface) {
-                    Tab(selectedTab == 0, { selectedTab = 0 }, text = { Text("列表", fontSize = 13.sp) })
-                    Tab(selectedTab == 1, { selectedTab = 1 }, text = { Text("统计", fontSize = 13.sp) })
-                    Tab(selectedTab == 2, { selectedTab = 2 }, text = { Text("存储", fontSize = 13.sp) })
-                    Tab(selectedTab == 3, { selectedTab = 3 }, text = { Text("图表", fontSize = 13.sp) })
-                    Tab(selectedTab == 4, { selectedTab = 4 }, text = { Text("日志", fontSize = 13.sp) })
-                    Tab(selectedTab == 5, { selectedTab = 5 }, text = { Text("图标", fontSize = 13.sp) })
+                    Tab(selectedTab == 0, { selectedTab = 0 }, text = { Text("列表", fontSize = 13.sp, maxLines = 1) })
+                    Tab(selectedTab == 1, { selectedTab = 1 }, text = { Text("统计", fontSize = 13.sp, maxLines = 1) })
+                    Tab(selectedTab == 2, { selectedTab = 2 }, text = { Text("存储", fontSize = 13.sp, maxLines = 1) })
+                    Tab(selectedTab == 3, { selectedTab = 3 }, text = { Text("图表", fontSize = 13.sp, maxLines = 1) })
+                    Tab(selectedTab == 4, { selectedTab = 4 }, text = { Text("日志", fontSize = 13.sp, maxLines = 1) })
+                    Tab(selectedTab == 5, { selectedTab = 5 }, text = { Text("图标", fontSize = 13.sp, maxLines = 1) })
                 }
             }
 

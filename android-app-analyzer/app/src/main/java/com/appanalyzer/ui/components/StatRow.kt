@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -23,9 +24,15 @@ fun StatRow(label: String, value: String, icon: ImageVector) {
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(label, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        Text(value, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.width(10.dp))
+        // 标签占满剩余宽度但**不换行**；数值永远不换行、不被挤压
+        Text(
+            label, fontSize = 13.sp, modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
