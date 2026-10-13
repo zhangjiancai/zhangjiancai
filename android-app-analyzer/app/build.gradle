@@ -1,0 +1,130 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.appanalyzer'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.appanalyzer"
+        minSdk 26
+        targetSdk 34
+        // 版本号规则：主版本.次版本.修订号
+        //   主版本 +1  不兼容的大改动 / 架构重做
+        //   次版本 +1  新增功能（本次：四类风格 + 本地训练小模型）
+        //   修订号 +1  修 bug
+        // 1.0.0 -> 1.1.0：本地风格从「一种解析式色彩迁移」改成「四类风格」，
+        //                 其中自定义风格改为在设备上训练一个颜色查找表小模型。
+        versionCode 110
+        versionName "1.1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary true
+        }
+
+        // ONNX Runtime 的原生库很大：arm64-v8a 16.3 MB、x86_64 18.1 MB（都是未压缩的 .so）。
+        // 所以**默认只打 arm64-v8a**（现在的手机基本都是这个），把 x86_64 排掉能省 18 MB。
+        //
+        // 需要在 x86_64 模拟器上调试时加一个开关：
+        //     gradlew assembleDebug -PwithX86
+        // 这样日常产出的 APK 是瘦的，要测试时再临时带上模拟器架构。
+        def abis = project.hasProperty('withX86') ? ['arm64-v8a', 'x86_64'] : ['arm64-v8a']
+        ndk {
+            abiFilters(*abis)
+        }
+
+        // 安全：不再把 DeepSeek API Key 编译进 APK。
+        // 任何写进 BuildConfig 的密钥都能被反编译直接取出，因此密钥改由
+        // 用户在应用内「设置」页填写，只保存在本机 SharedPreferences 中。
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        compose true
+        buildConfig true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.8'
+    }
+
+    packaging {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+}
+
+dependencies {
+    // AndroidX Core
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+    implementation 'androidx.activity:activity-compose:1.8.2'
+
+    // Jetpack Compose
+    implementation platform('androidx.compose:compose-bom:2024.02.00')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-graphics'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.material3:material3'
+    // 注意：不要加回 androidx.compose.material:material-icons-extended。
+    // 它的 aar 有 34 MB（两千多个图标各自一个 Kotlin 对象），而 minifyEnabled=false 时
+    // R8 不会剔除未使用的类，整个库都会被编进 dex —— 实测让 classes.dex 涨到 44 MB。
+    // 项目用到的图标见 ui/icons/AppIcons.kt；material-icons-core 随 material3 传递进来，
+    // 其中的 49 个常用图标仍可直接用 Icons.Default.Xxx。
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
+    implementation 'androidx.navigation:navigation-compose:2.7.6'
+
+    // Networking
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    // Coroutines
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // 端侧模型推理。
+    //
+    // ⚠️ 这里有个实测踩出来的坑：**onnxruntime-mobile 不能加载标准 .onnx 文件**，
+    // 加载时直接抛 ORT_INVALID_ARGUMENT: "ONNX format model is not supported in this build"。
+    // mobile 版只认官方 Python 工具转出来的 .ort 格式，而格式转换必须在电脑上做，
+    // 手机端无法完成。所以要用「按需下载任意 .onnx 模型」这条路，只能用完整版。
+    // 完整版的代价：arm64-v8a 的 .so 是 16.3 MB、x86_64 是 18.1 MB。
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.18.0'
+
+    // DataStore
+    implementation 'androidx.datastore:datastore-preferences:1.0.0'
+
+    // 图标包 APK 的 v2 签名。
+    //
+    // apksig 就是 apksigner 背后的那套实现（纯 Java，没有 Android 依赖），
+    // 版本与 AGP 保持一致（AGP 8.2.2 自身也依赖它），避免重复引入不同版本。
+    // 用法见 service/iconpack/ApkSignerV2.kt：v2-only，不写 v1/v3/v4。
+    implementation 'com.android.tools.build:apksig:8.2.2'
+
+    // Testing
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    androidTestImplementation platform('androidx.compose:compose-bom:2024.02.00')
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
+}

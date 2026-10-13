@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      只保留 themes.xml 真正引用的三个颜色。
+      原来还有 purple_200 / teal_700 / black / white / gray / light_gray 六个，没有任何引用。
+      注意：Compose 界面里的颜色是直接写在 Kotlin 里的，不走这里的资源。
+    -->
+    <color name="purple_500">#6200EE</color>
+    <color name="purple_700">#3700B3</color>
+    <color name="teal_200">#03DAC5</color>
+</resources>

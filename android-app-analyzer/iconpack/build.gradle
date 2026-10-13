@@ -1,0 +1,58 @@
+// :iconpack —— 把 AppAnalyzer 导出的图标包源目录，直接编译成一个可安装的
+// 启动器图标包（Icon Pack）APK。
+//
+// 这是一个「纯资源」Android application 模块：没有 Kotlin/Java 源码，
+// 也不依赖任何第三方库，只包含 AndroidManifest + assets + res。
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.appanalyzer.iconpack'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.appanalyzer.iconpack"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    // 手机 App 导出的目录结构（固定契约，构建时不需要移动/复制任何文件）：
+    //   src/main/generated/assets/appfilter.xml
+    //   src/main/generated/assets/drawable.xml
+    //   src/main/generated/res/xml/appfilter.xml
+    //   src/main/generated/res/xml/drawable.xml
+    //   src/main/generated/res/drawable-xxhdpi/ic_*.png
+    //   src/main/generated/meta.json
+    //
+    // 关键点：assets 的 source dir 本身就是 APK 里的 assets/ 根目录，
+    // 所以必须指向 generated/assets（若指向 generated/，APK 里会变成
+    // assets/assets/appfilter.xml，启动器就读不到了）；res 同理指向 generated/res。
+    // 用 += 追加，保留默认的 src/main/assets 与 src/main/res。
+    sourceSets {
+        main {
+            assets.srcDirs += 'src/main/generated/assets'
+            res.srcDirs += 'src/main/generated/res'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 本模块只是一个资源容器，Lint 的 Instantiatable 等源码级检查在这里没有意义。
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

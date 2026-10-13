@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 图标包 APK 自己的图标（不会影响被替换的 App 图标）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#FF3DDC84"
+        android:pathData="M9,4h30a5,5 0 0 1 5,5v30a5,5 0 0 1 -5,5h-30a5,5 0 0 1 -5,-5v-30a5,5 0 0 1 5,-5z" />
+    <path
+        android:fillColor="#FF10331F"
+        android:pathData="M13,13h9v9h-9z" />
+    <path
+        android:fillColor="#FF10331F"
+        android:pathData="M26,13h9v9h-9z" />
+    <path
+        android:fillColor="#FF10331F"
+        android:pathData="M13,26h9v9h-9z" />
+    <path
+        android:fillColor="#FF10331F"
+        android:pathData="M26,26h9v9h-9z" />
+</vector>

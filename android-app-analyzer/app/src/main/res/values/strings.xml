@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      这里只保留真正被引用的字符串。
+
+      原来有 50 条（loading / error / retry / 各种排序标签 / AI 分析标题 / 权限说明……），
+      但源码里 **一条 stringResource / R.string 都没有用过**，界面文字全部是硬编码中文。
+      那些零引用的条目属于死资源，已删除；将来做多语言时再按需补回来。
+
+      app_name 是唯一真正被使用的：AndroidManifest.xml 的 android:label 引用它。
+    -->
+    <string name="app_name">应用分析器</string>
+</resources>

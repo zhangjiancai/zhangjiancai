@@ -1,0 +1,25 @@
+# ---- 构建产物 ----
+/build/
+/app/build/
+/iconpack/build/
+/.gradle/
+/.idea/
+*.iml
+/captures
+.externalNativeBuild
+.cxx
+*.log
+
+# ---- 本地配置（含 SDK 路径与 API Key，绝不入库）----
+/local.properties
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+
+# ---- 图标包模块的导出解压目录 ----
+# 这里放的是从手机导出、临时解压进来的图标，属于中间产物，不进版本库。
+# 但保留目录本身和占位文件，否则空目录会让 aapt2 报错。
+/iconpack/src/main/generated/assets/*
+/iconpack/src/main/generated/res/drawable-xxhdpi/*
+!/iconpack/src/main/generated/res/drawable-xxhdpi/ic_placeholder.png

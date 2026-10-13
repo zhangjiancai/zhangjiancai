@@ -1,0 +1,18 @@
+<resources>
+    <!--
+      应用主题。Compose 界面本身用的是 MaterialTheme（在 MainActivity 里直接套），
+      这里主要给 window 背景和启动闪屏用。
+    -->
+    <!--
+      浅色主题（默认）。深色版本在 values-night/themes.xml 里。
+
+      为什么不用 Theme.DeviceDefault.DayNight：框架主题里没有 DayNight + NoActionBar
+      的组合（实测 aapt2 直接报 resource not found），用 DayNight 又会多出一个系统 ActionBar。
+      改用 values-night 资源限定符是框架原生做法，零依赖，效果一样。
+    -->
+    <style name="Theme.AppAnalyzer" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/purple_500</item>
+        <item name="android:colorPrimaryDark">@color/purple_700</item>
+        <item name="android:colorAccent">@color/teal_200</item>
+    </style>
+</resources>

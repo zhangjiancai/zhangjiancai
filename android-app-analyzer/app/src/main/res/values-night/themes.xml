@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      深色主题。系统切到深色模式时 Android 会自动选用这个文件里的同名 style，
+      不需要任何代码或 AppCompat 依赖。
+
+      只覆盖窗口底色：界面本身是 Compose 画的，配色由 AppTheme 里的
+      darkColorScheme 决定，这里管的是「Compose 还没画上去之前的那个窗口背景」，
+      不设的话深色模式下启动瞬间会闪一下白屏。
+    -->
+    <style name="Theme.AppAnalyzer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/purple_500</item>
+        <item name="android:colorPrimaryDark">@color/purple_700</item>
+        <item name="android:colorAccent">@color/teal_200</item>
+        <item name="android:windowBackground">@android:color/background_dark</item>
+    </style>
+</resources>

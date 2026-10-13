@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 图标包在启动器「图标包列表」里显示的名字。想改名就改这里。 -->
+    <string name="app_name">App Analyzer Icons</string>
+</resources>
