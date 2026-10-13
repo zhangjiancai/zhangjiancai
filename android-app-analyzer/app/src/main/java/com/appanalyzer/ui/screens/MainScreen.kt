@@ -233,14 +233,14 @@ fun MainScreen() {
             AnimatedVisibility(visible = hasStoragePermission == false && !permissionCardDismissed) {
                 // 压成一条：以前是「图标 + 两行文字 + 授权按钮 + 关闭按钮」的卡片，
                 // 光这一条就吃掉约 70dp，相当于少看一个应用。
-                Surface(color = Color(0xFFFFF3E0), modifier = Modifier.fillMaxWidth()) {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
                     Row(
                         Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Warning, null, tint = Color(0xFFFF9800), modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("无存储权限，缓存/数据显示为「—」", fontSize = 11.sp, modifier = Modifier.weight(1f))
+                        Text("无存储权限，缓存/数据显示为「—」", fontSize = 11.sp, color = MaterialTheme.colorScheme.onErrorContainer, maxLines = 1, modifier = Modifier.weight(1f))
                         TextButton(
                             onClick = { openUsageAccessSettings(context) },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),

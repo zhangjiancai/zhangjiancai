@@ -55,17 +55,22 @@ object ChartPalette {
     /** 网格线：必须弱化，不能比数据本身还显眼。 */
     @Composable
     @ReadOnlyComposable
-    fun grid(): Color = MaterialTheme.colorScheme.outline.copy(alpha = if (isDark()) 0.30f else 0.20f)
+    fun grid(): Color = MaterialTheme.colorScheme.outline.copy(alpha = if (isDark()) 0.32f else 0.22f)
 
     /** 条形/堆叠条的轨道底色（未填充部分）。 */
     @Composable
     @ReadOnlyComposable
     fun track(): Color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isDark()) 0.50f else 0.65f)
 
-    /** 卡片描边。用一根发丝线代替阴影，两种模式下都干净。 */
+    /**
+     * 卡片描边 / 分隔线。用一根发丝线代替阴影，两种模式下都干净。
+     *
+     * 直接用 outlineVariant：AppTheme 里它是被刻意设计成"低对比、不刺眼"的那一档，
+     * 这里不再自己叠 alpha，免得和主题的设计意图打架。
+     */
     @Composable
     @ReadOnlyComposable
-    fun hairline(): Color = MaterialTheme.colorScheme.outline.copy(alpha = if (isDark()) 0.26f else 0.18f)
+    fun hairline(): Color = MaterialTheme.colorScheme.outlineVariant
 
     /**
      * 同色相台阶的浓度（alpha）。

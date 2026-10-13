@@ -581,8 +581,10 @@ private fun LineCurveChart(
     }
     val plotLeftPx = labelWidthPx + with(density) { 12.dp.toPx() }
     val plotRightPx = with(density) { 10.dp.toPx() }
-    val topPadPx = with(density) { 6.dp.toPx() }
-    val bottomPadPx = with(density) { 30.dp.toPx() }
+    // 上下留白跟着字号走：系统字体放大到 1.3 倍时，刻度文字会变高，
+    // 写死 6dp/30dp 会把最上面那行刻度顶出画布。
+    val topPadPx = labelPx * 0.7f + with(density) { 4.dp.toPx() }
+    val bottomPadPx = labelPx * 2f + with(density) { 16.dp.toPx() }
 
     val gridColor = ChartPalette.grid()
     val lineColor = ChartPalette.accent()

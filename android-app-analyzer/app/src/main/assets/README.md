@@ -1,282 +1,146 @@
-# App Analyzer（应用分析器）
+# App Analyzer · 安卓应用分析器
 
-一个 Android 上的**应用存储分析**工具：枚举设备上已安装的应用，读取每个应用真实占用的
-体积（应用本体 / 缓存 / 数据），做统计与图表，并可选调用 DeepSeek API 自动为应用分类。
+> **版本 1.2.0**（versionCode 120）· 最后更新 2026-10-14
+>
+> 仓库：<https://github.com/zhangjiancai/zhangjiancai> → `android-app-analyzer/` 目录
 
-> 本文档描述的是**当前代码实际能做的事情**。之前的版本列了一张很漂亮的功能清单
-> （文件分类统计、大文件识别、存储健康度评分、AI 分析页、饼图/环形图、ViewModel 架构……），
-> 那些**在代码里都不存在**。现在按实际实现重写。
+一句话说清它做什么：**枚举手机里所有已安装应用，读出它们真实的体积，并且能给它们批量生成新图标、导出成启动器能用的图标包。**
 
 ---
 
-> **版本 1.1.0** · 最近更新：2026-10-14
->
-> **还没上传到 GitHub。** 原因不是网络（实测 github.com 现在可以访问），
-> 而是这台机器上**没有你的任何 GitHub 凭据**：没装 `gh` CLI、没有 git-credential-manager、
-> `~/.ssh` 下没有密钥，全局 git 身份指向的是企业微信的 `git.weixin.qq.com`。
->
-> 准备推送时执行（把两个占位符换成你的）：
->
-> ```powershell
-> cd D:\zjc20\Documents\android-app-analyzer
-> git remote add origin https://github.com/你的用户名/仓库名.git
-> git push -u origin master
-> ```
->
-> 会弹窗要求登录 GitHub（用 Personal Access Token 当密码）。推完记得 `git remote -v` 确认。
->
-> **推之前我已经确认过**：仓库里没有 `local.properties`、没有构建产物、没有 APK、
-> 没有模型文件、没有密钥库，全文搜索也找不到任何 `sk-` 开头的 key。
+## 一、需求 → 实现情况（总表）
 
----
+这一节只写**你提过的原始要求**和**实际做到什么程度**。没做到的直接标出来，不修饰。
 
-## 需求 → 完成情况
-
-这一节只写**你的原始要求**和**实际做到什么程度**，不修饰。
+### 1.1 图标功能（你指定的第一优先）
 
 | # | 你的要求 | 状态 | 说明 |
 |---|---|---|---|
-| 1 | 白线勾勒风格（适合纯黑壁纸） | ✅ 完成 | Canny 全流程：高斯去噪 → 逐通道 Sobel → 非极大值抑制细线 → 双阈值+滞后连接 → 黑底白线 |
-| 2 | 拟物化风格（图生图） | ⚠️ 本地近似 | 高光+浮雕+内阴影做出立体感，**但这不是生成出来的材质**。真正的拟物化需要生成模型，端侧没有，只能走云端 API |
-| 3 | 极简主义（纯色块组合） | ✅ 完成 | k-means 量化 + **众数滤波**清碎块（只量化会留下马赛克，不像色块） |
-| 4 | 自定义风格（用户手动定义） | ✅ 完成 | 用户给风格图，**在设备上训练一个小模型**（17³ 颜色查找表，约 1.5 万参数） |
-| 5 | 风格迁移要「本地训练一个小模型」 | ✅ 完成 | 见下方「本地训练的小模型」一节 |
-| 6 | 模型按需下载，用户选哪个下哪个 | ✅ 完成 | 4 个模型，实测下载/校验/推理全通 |
-| 7 | 说明本地模型能做什么、为什么生不出图 | ✅ 完成 | 见「端侧模型到底能做什么」一节 |
-| 8 | 版本号写好 | ✅ 完成 | 1.0.0 → **1.1.0**（versionCode 110），规则写在 `app/build.gradle` 注释里 |
-| 9 | README 写好 | ✅ 完成 | 就是本文 |
-| 10 | 上传 GitHub | ❌ 未完成 | 缺凭据，见上方说明 |
+| 1 | 白线勾勒风格，适合纯黑壁纸 | ✅ | Canny 全流程：高斯去噪 → 逐通道 Sobel → 非极大值抑制细到 1px → Otsu 双阈值 + 滞后连接 → 黑底白线 |
+| 2 | 拟物化（图生图） | ⚠️ 本地近似 | 浮雕当法线 + 左上打光 + 高光 + 内阴影。**这是光照模拟，不是生成出来的材质**；真拟物化只能走云端 API |
+| 3 | 极简主义，纯色块组合 | ✅ | k-means 量化 + **3x3 众数滤波**清碎块（只量化会得到马赛克而不是色块） |
+| 4 | 自定义风格，用户手动定义 | ✅ | 用户给风格图，**在设备上训练一个 17³ 颜色查找表模型** |
+| 5 | 本地算法：风格参考图 + 原图标 → 新图标 | ✅ | `LocalStyleRenderer` / `ColorLutModel` |
+| 6 | API/本地大模型：文字 + 可选风格参考图 + 原图标 → 新图标 | ✅ | Gemini / OpenAI 支持双图输入；万相 / SeedEdit 是单图接口，UI 里已说明 |
+| 7 | 风格迁移要「学习一个小模型，在用户本地训练」 | ✅ | 17×17×17 LUT + 三线性插值，Adam + 余弦退火，解析法热启动 |
+| 8 | 抠完图之后要生成图标（不是断头路） | ✅ | 三级管线：抠图 → 主体风格化 → 合成（换背景/留白/投影/圆角） |
+| 9 | 模型按需下载，用户选哪个下哪个 | ✅ | 4 个模型，实测下载/校验/推理全通 |
+| 10 | 说清楚本地模型能做什么、为什么生不出图 | ✅ | 见 §3.3 |
+| 11 | DeepSeek 生成拟物化的详细描述，再交给生图模型 | ✅ | `DeepSeekService.generateSkeuoPrompt()` |
+| 12 | 在手机里直接生成图标包 APK + 应用内教程 | ✅ | 手写 AXML + arsc + ZIP + apksig v2 签名，实测可安装 |
+| 13 | 生成之后要能重新生成 | ✅ | 「跳过已生成」开关 + 独立的「重新生成」按钮 |
+| 14 | 每个图标都要能生成（不只前 50 个） | ✅ | 列表含全部应用（258 个），图标按需懒加载 |
+| 15 | 图标页要能滚动，面板展开不能吃掉列表 | ✅ | 整页改成单个 LazyColumn，删掉嵌套的第二层 |
+| 16 | 缺图标手工补，不要打整个图标库 | ✅ | `ui/icons/AppIcons.kt`，33 个图标取自官方 SVG 逐点校验 |
 
-### 还没做到的（不藏）
+### 1.2 图表（你指定的第二优先）
 
-- **拟物化只是近似**，不是真的图像生成。
-- **端侧生成模型不存在**：魔搭上 AnimeGAN / CartoonGAN / AdaIN / fast-neural-style / Photo2Cartoon 等 30 多个候选全部 404，扩散模型又是几百 MB 起步。要「用文字生成图标」只能走云端 API。
-- **抠图模型对图标效果差**：实测 MODNet 在图标上的掩码 100% 全不透明，等于没抠（它是人像模型）。更合适的 U2Net（167.8 MB）还没做效果验证。
-- **四类风格只在单元测试层面验证过**，真机批量跑图的效果我还没看过。
+| # | 你的要求 | 状态 | 说明 |
+|---|---|---|---|
+| 17 | 图表要「高级一些」 | ✅ | 重设计：圆角柱 + 渐变填充 + 弱化网格线 + 选中高亮态；全部 Canvas 手绘，**没加新依赖** |
+| 18 | 轴标签/图例不能换行 | ✅ | 统一 `maxLines = 1` + Ellipsis |
 
----
+### 1.3 统计（你指定的第三优先）
 
-## 一句话说清它做什么
+| # | 你的要求 | 状态 | 说明 |
+|---|---|---|---|
+| 19 | 统计界面重新设计，不要「土里土气」 | ✅ | 327 → 542 行，信息层级重排：主数字突出、说明弱化 |
+| 20 | 提高信息密度 | ✅ | 卡片内边距 20/16 → 12/10，间距 16 → 8，标题 18~20sp → 14~15sp |
 
-打开 → 拿到「使用情况访问」权限 → 看到 258 个应用各自占了多少空间，谁最占地方，
-缓存都堆在哪几个应用上。
+### 1.4 界面与体验
 
----
+| # | 你的要求 | 状态 | 说明 |
+|---|---|---|---|
+| 21 | 全局紧凑，不能只做图标页 | ✅ | 缩放 `LocalDensity` 0.85 倍，**所有页面所有 dp/sp 一起缩小**，新增页面自动跟随 |
+| 22 | 支持不同大小的屏幕 | ✅ | `AdaptiveScaffold`：三档屏幕（<600 / 600~839 / ≥840dp），宽屏限宽居中 |
+| 23 | 跟随系统深浅色 | ✅ | `AppTheme` 默认 `isSystemInDarkTheme()`；`values-night/` 提供深色窗口背景 |
+| 24 | 配色要统一 | ✅ | 一套色相（H≈215）靠明度分层，不再出现蓝主色 + 紫按钮 + 橙高亮 |
+| 25 | 暗夜模式有的字看不清、有的亮线刺眼 | ✅ | 深色不用纯黑（#12151A）、正文不用纯白（#E2E5EA）、主色压暗到 #8FB6F0、分隔线用低对比的 outlineVariant |
+| 26 | 标签和按钮文字不要换行 | ✅ | Chip / Tab / 按钮 / 统计项统一 `maxLines = 1`，数值优先完整、标签可省略 |
+| 27 | 关于按钮放进设置界面 | ✅ | 顶栏 Info 图标已移除，改到设置页「其他」分组 |
+| 28 | 把 README 放进关于页 | ✅ | README 复制到 `assets/` 随 APK 打包，关于页读出来做简易 Markdown 渲染 |
+| 29 | 给用户越多自定义权越好，说明清楚，给默认值 | ✅ | 四类风格可切、极简色数 2~8、合成背景 4 类 + 5 组预设配色、主体大小/圆角/投影浓度可调；全部有默认值且存盘 |
 
-## 功能清单（均有对应实现）
+### 1.5 工程
 
-| 功能 | 实现位置 |
+| # | 你的要求 | 状态 | 说明 |
+|---|---|---|---|
+| 30 | 不要虚假数据 | ✅ | 读不到就显示「—」，绝不估算。见 §九 |
+| 31 | 每个功能都要有测试代码和接口 | ✅ | **151 个用例，10 个测试文件**；算法模块留了纯像素入口可脱离 Android 调用。见 §十一 |
+| 32 | 删除多余文件，命名准确 | ✅ | 删掉 23 个（构建日志 / pom.xml / 13 个过时交付文档 / 冗余脚本），根目录 33 → 10 个文件 |
+| 33 | 版本号写好 | ✅ | 1.0.0 → 1.1.0 → **1.2.0**，规则写在 `app/build.gradle` 注释里 |
+| 34 | 上传 GitHub（新建文件夹） | ✅ | `android-app-analyzer/` 目录，107 个文件 |
+
+### 1.6 还没做到的（不藏）
+
+| 事项 | 为什么 |
 |---|---|
-| 枚举所有已安装应用 | `service/AppInfoService.kt` `getAllInstalledApps()` |
-| 读取真实体积（应用/缓存/数据） | `AppInfoService.measureAppSizes()`，数据来自 `StorageStatsManager` |
-| 搜索 / 按大小/名称/分类排序 | `ui/screens/AppListScreen.kt` |
-| 汇总统计（总数、总占用、均值、极值） | `service/AnalysisService.kt` |
-| 体积分布直方图 | `StatisticsScreen.kt` 内的 Canvas |
-| 排行榜横向柱状图 | `ChartScreen.kt` `BarChartView()` |
-| L 型折线图 + 面积填充 | `ChartScreen.kt` `LCurveChart()` |
-| 应用分类（本地启发式） | `AppInfoService.smartClassify()`，包名/应用名/权限加权评分 |
-| 应用分类（AI，可选） | `DeepSeekService.classifyWithCustomTags()` |
-| 图标生成 · 云端 API | `service/imagegen/` —— 通义万相 / 豆包 SeedEdit / Gemini / OpenAI |
-| 图标生成 · 本地风格迁移 | `service/image/StyleTransfer.kt`（风格参考图 + 原图标 → 新图标） |
-| 图标生成 · 端侧模型 | `service/localmodel/`（ONNX Runtime，模型按需下载） |
-| 风格参考图库 | `service/image/StyleLibrary.kt`（相册导入 + 内置参考图） |
-| 导出图标包（给启动器用） | `service/IconPackExporter.kt` + `:iconpack` Gradle 模块 |
-| 文件日志 + 自动轮转 | `service/DebugLogger.kt` |
+| **端侧没有生成模型** | 魔搭上 AnimeGAN / CartoonGAN / AdaIN / fast-neural-style / Photo2Cartoon / UGATIT 等 30 多个候选**全部 404**；`.pth` 权重 Android 加载不了；扩散模型几百 MB 起。端侧只有抠图和超分 |
+| **拟物化只是光照近似** | 画不出真正的材质纹理。要真拟物化必须走云端 API |
+| **抠图模型对图标效果差** | 实测 MODNet 在图标上的掩码 100% 全不透明，等于没抠（它是人像模型）。更合适的 U2Net（167.8 MB）还没做效果验证 |
+| **没有真实第三方启动器验证** | 模拟器里没有 Nova / Lawnchair 等。用的是平台自身的解析路径（query-activities + getResourcesForApplication），这正是启动器取图依赖的机制，但具体启动器版本的实际表现没测到 |
+| **GUI 观感未经验证** | 我无法查看渲染结果，只能保证编译通过和数值上的尺寸变化。配色、间距、手感需要你实际装上确认 |
+| **两个页面（统计/图表）是子代理盲改的** | 同上，需要你实际看 |
 
 ---
 
-## 关键设计：数据诚实性
+## 二、功能优先级
 
-这个应用最容易犯的错误是**在拿不到数据时编一个数出来**。当前实现对此有硬约束：
+你明确指定的重要度排序，README 也按这个顺序组织：
 
-### 1. 没有权限就显示「—」
-
-`StorageStatsManager` 需要「使用情况访问」（PACKAGE_USAGE_STATS）权限。
-没有它，系统根本不允许读取其他应用的数据目录。
-
-- 老实现：拿不到就读 `File(dataDir)` → 必然失败返回 0 → 于是用
-  `apkSize * 0.2` 当缓存、`apkSize * 1.0` 当数据"估算"出来，并当成测量值展示。
-  实测在 258 个应用的模拟器上，未授权时统计页显示 **8.0 GB**，而真实值是 **2.9 GB** ——
-  虚高 2.76 倍，用户完全无从分辨。
-- 现实现：读不到就是读不到。`AppInfo.hasSizeDetail=false`，
-  UI 统一显示 `—`（`ui/util/FormatUtil.kt` 的 `UNKNOWN_SIZE`），并提示需要授权。
-
-### 2. 缓存不会被算两遍
-
-Android 官方文档（`StorageStats.getDataBytes()`）明确写明：
-
-> Return the size of all data. This includes files stored under
-> `Context.getDataDir()`, **`Context.getCacheDir()`**, `Context.getCodeCacheDir()`.
-
-也就是说 **dataBytes 已经包含 cacheBytes**。老实现做 `appSize + dataSize + cacheSize`
-求和，把缓存重复计算了一次。现在 `dataSize = dataBytes - cacheBytes`，
-三个字段互不重叠。
-
-### 3. 应用体积用 APK 文件的直接 stat 值，**不用** `appBytes`
-
-这里走过一次弯路，值得记下来：一度以为 `StorageStats.getAppBytes()`（= APK + native 库 +
-dexopt 产物）比直接读 APK 文件更准确，就换了过去。结果实测发现它**只统计默认卷（/data）
-上的代码，不包含预装在只读分区（/product）上的 APK**：
-
-| 应用 | APK 真实大小 | 用 `appBytes` 后显示 |
-|---|---|---|
-| Photos | 168.4 MB | 排不进前 11（< 6.5 MB） |
-| Gmail | 174.0 MB | 同上 |
-| YouTube | 139.0 MB | 同上 |
-| Google Play services | 190.2 MB | 52.2 MB |
-
-所有系统应用体积集体缩水，应用本体总和从真实的 **2.68 GB** 掉到 **0.2 GB**。
-所以现在用 `File(sourceDir).length()`（含 split APK）—— 直接读文件大小，与分区无关，永远是真值。
+1. **图标功能**（§三）—— 最重要
+2. **图表**（§四）
+3. **统计界面**（§五）
 
 ---
-
-## 权限
-
-| 权限 | 用途 | 获取方式 |
-|---|---|---|
-| `QUERY_ALL_PACKAGES` | 列出全部已安装应用 | 自动授予（注意：Google Play 对此权限有额外审核要求） |
-| `PACKAGE_USAGE_STATS` | 读取各应用缓存/数据大小 | **用户在 系统设置 → 使用情况访问 中手动开启** |
-| `INTERNET` | 调用 DeepSeek API（可选功能） | 自动授予 |
-
-授权后返回应用会**自动重新加载**（`MainScreen.kt` 里的 `ON_RESUME` 监听），
-不需要手动点刷新。
-
 ---
 
-## AI 分类（可选）
+## 三、图标功能（第一优先）
 
-在「设置」里填入 DeepSeek API Key 后可用。流程是**两步**：
-
-1. 把应用名样本发给模型，让**模型自己定义 10–20 个分类标签**；
-2. 再分批（每批 50 个）把应用名发给模型，让它按第一步的标签输出 `名称|标签`。
-
-结果按 **应用显示名** 匹配（AI 只拿得到应用名），所以**同名应用共享同一个分类**。
-分类结果按 `MD5(排序后的包名列表)` 缓存，应用列表没变化就不会重复调用 API。
-
-### 🔐 关于 API Key
-
-**API Key 只保存在本机 SharedPreferences 里，不会被打包进 APK。**
-
-早期版本用 `buildConfigField` 把 `local.properties` 里的密钥编译进了
-`BuildConfig.DEEPSEEK_API_KEY` —— 那等于把密钥随 APK 一起发出去，反编译即可读取。
-该路径已完全删除。**如果你用过那个版本并分发过 APK，请到 DeepSeek 控制台吊销重建密钥。**
-
-另外，客户端直连第三方 API 本身就无法真正保护密钥。如果这个应用要给他人使用，
-正确做法是自建一个后端做代理，而不是把密钥放进客户端。
-
----
-
-## 图标生成（图生图）
-
-「图标」页做的是**图生图**：输入是「原图标 + 应用名 + 你填的特征描述 + 选中的风格」，
-输出是一张新图标。可以批量生成，再导出一整套图标包给启动器用。
-
-### 生成引擎
-
-引擎是可插拔的，在页面上点「更换」切换。每家的 Key 各存各的，换服务商不用重填。
-
-| 引擎 | 说明 | 是否需要 Key |
-|---|---|---|
-| 阿里云百炼 · 通义万相 | `wanx2.1-imageedit`，走 `description_edit` 指令编辑 | 是 |
-| 火山引擎方舟 · 豆包 SeedEdit | `doubao-seededit-3-0-i2i-250628` | 是 |
-| Google Gemini | `gemini-2.5-flash-image` | 是 |
-| OpenAI | `gpt-image-1`，走 `/v1/images/edits` | 是 |
-| 本地图像算法 | 对**原图标**做像素级处理，**不联网、零成本** | 否 |
-
-**DeepSeek 没有生图接口**（只有 deepseek-chat / deepseek-reasoner 两个纯文本模型），
-所以图标生成用的是上面这些服务，和「AI 分类」用的 DeepSeek Key 是两回事。
-
-所有服务商都是**直接传 Base64 图片**（`data:image/png;base64,...`），不需要把图片先传到
-某个公网地址 —— 通义万相的 `base_image_url` 字段官方说明就是「URL 或 Base64 编码数据」。
-输入图统一用 512×512（万相要求输入分辨率在 512~4096 之间），输出统一归一化到 192×192。
-
-### 输入输出约定（这一节是重点）
-
-| 引擎 | 输入 | 输出 |
-|---|---|---|
-| **本地风格迁移** | **风格参考图 + 原图标** | 新图标 |
-| **API / 端侧模型** | **文字 + 可选风格参考图 + 原图标** | 新图标 |
-
-**本地风格迁移**由**用户提供的风格参考图**决定风格，不是写死几个预设。
-用户从相册导入任意一张图当作风格基准，之后所有图标都按这张图的风格迁移。
-内置另外提供了 6 张程序生成的参考图，保证没导入图片时也能直接开箱使用。
-
-算法是经典的 **Reinhard 色彩迁移**（Reinhard et al., "Color Transfer between Images", 2001）：
-把原图标和风格图都转到 **lαβ 空间**（该色彩空间就是为色彩迁移设计的，三通道相关性最低），
-再逐通道做
-
-```
-out = (src − μ_src) × (σ_ref / σ_src) + μ_ref
-```
-
-结果是**结构 100% 来自原图标、色彩统计 100% 来自风格图**。另有两种模式：
-
-- **调色板**：从风格图 k-means 求 6 个主色，把图标吸附上去，出色块感
-- **渐变映射**：把风格图主色按亮度排成渐变带，用图标亮度查表
-
-还有一个**强度**滑块（0~1）在「原图」和「迁移结果」之间线性混合。
-
-### 四类本地风格
+### 3.1 四类本地风格
 
 风格不是几张写死的预设图，而是四类**做法完全不同**的算法。全部在 `service/image/LocalStyleRenderer.kt`，
-纯像素运算，不依赖 GPU / RenderScript，可以脱离 Android 直接跑单元测试。
+纯像素运算、不依赖 GPU/RenderScript，可以脱离 Android 直接跑单元测试。
 
-| 风格 | 算法 | 说明 |
-|---|---|---|
-| **白线勾勒** | Canny 全流程 | 高斯去噪 → **逐通道** Sobel → 非极大值抑制把线细到 1px → Otsu 自适应双阈值 + 滞后连接 → 黑底白线 |
-| **拟物化** | 光照模拟 | 提饱和 → 方向性差分求浮雕当法线 → 左上打光 → 上方叠高光（screen）→ 底部压暗做内阴影 |
-| **极简色块** | 量化 + 众数滤波 | k-means 求 N 个主色 → 吸附 → **3x3 众数滤波清掉碎块** |
-| **自定义** | 本地训练的小模型 | 用户给风格图，在设备上训练一个 17³ 颜色查找表 |
+| 风格 | 算法 |
+|---|---|
+| **白线勾勒** | Canny 全流程：高斯去噪 → **逐通道** Sobel → 非极大值抑制把线细到 1px → Otsu 自适应双阈值 + 滞后连接 → 黑底白线 |
+| **拟物化** | 提饱和 → 方向性差分求浮雕当法线 → 左上打光 → 上方叠高光（screen）→ 底部压暗做内阴影 |
+| **极简色块** | k-means 求 N 个主色 → 吸附 → **3x3 众数滤波清掉碎块** |
+| **自定义** | 用户给风格图，在设备上训练一个 17³ 颜色查找表模型 |
 
-两个细节值得说：
+两个容易被忽略的细节：
 
-1. **白线勾勒的梯度算在 RGB 三个通道上，不是只算灰度**。应用图标经常出现
-   「亮度相同但颜色不同」的边界（红块挨着绿块），只算灰度会把这类边界整条丢掉。
-2. **极简色块的第三步不能省**。只做量化会留下大量 1~2 像素的噪点，看起来是马赛克而不是色块；
-   众数滤波把小块并进周围大块，才得到干净的纯色块拼合。
+1. **白线勾勒的梯度算在 RGB 三个通道上，不是只算灰度。**
+   应用图标经常出现「亮度相同但颜色不同」的边界（红块挨着绿块），只算灰度会把这些边界整条丢掉。
+2. **极简色块的众数滤波不能省。** 只做量化会留下大量 1~2 像素的噪点，看起来是马赛克而不是色块。
 
-### 本地训练的小模型（自定义风格）
+### 3.2 本地训练的小模型（自定义风格）
 
-这一条是重点：**自定义风格不是套公式，而是在用户手机上真的训练一个模型出来。**
+**自定义风格不是套公式，而是在用户手机上真的训练一个模型出来。**
 
-**模型**：一张 17×17×17 的三维颜色查找表（4913 个格点、14739 个参数）加三线性插值。
-它把「任意输入颜色」映射成「风格化后的颜色」。
-
-**训练**：梯度下降 + Adam + 余弦退火。目标函数是让变换后的内容在 lαβ 空间里的
-**均值、标准差、以及 5 个分位数**（10/25/50/75/90%）都逼近风格图的对应统计量。
-因为模型是非线性的，它能表达解析公式做不到的映射。
-
-**为什么训练代价很小**：三线性插值对参数的梯度就是那 8 个角的插值权重，反向传播只有几行；
-每次迭代只在一张降采样到约 2500 像素的图上前向。实测几百次迭代一秒左右完成。
-
-**训练数据是整个 RGB 色立方，不是某一个图标** —— 这是关键设计。
-喂均匀采样的色立方（16³ 格点，灰阶轴额外加权），学出来的查找表是一个完整的
-「任意颜色 → 风格化颜色」映射，于是**一张风格图只需要训练一次，之后所有图标直接套用**。
-训练结果按「风格图内容哈希」缓存到磁盘，换一张图才会重训。
+- **模型**：17×17×17 三维颜色查找表（4913 格点、14739 参数）+ 三线性插值。
+- **训练**：梯度下降 + Adam + 余弦退火。目标函数是让输出在 lαβ 空间的**均值、标准差、5 个分位数**
+  都逼近风格图。因为模型是非线性的，它能表达解析公式做不到的映射。
+- **训练数据是整个 RGB 色立方，不是某一个图标** —— 这是关键设计。
+  学出来的查找表是完整的「任意颜色 → 风格化颜色」映射，于是**一张风格图只训练一次，所有图标通用**。
+  结果按风格图内容哈希缓存到磁盘。
 
 #### 收敛速度：一个必须解决的坑
 
-从恒等映射直接开始训练，慢得没法用。实测（同一份数据、纯灰阶风格）：
+从恒等映射直接训练慢得没法用。实测（纯灰阶风格，指标是 β 通道标准差，越小越灰）：
 
-| 迭代次数 | β 通道标准差（越小越灰） |
-|---|---|
-| 300 | 0.045 |
-| 1500 | 0.022 |
-| 5000 | 0.011 |
-
-而且把学习率从 0.02 提到 0.30 **几乎没有变化** —— 说明瓶颈在收敛路径的长度，不在步长。
-β 标准差 0.03 在 lαβ 里已经对应约 70 的 RGB 通道差，肉眼可见；要压到无感需要几万次迭代，手机上不可接受。
-
-**解法是热启动**：先用解析法（逐通道矩匹配）把每个格点直接算出来，再让梯度下降只做精修。
-因为风格图是灰阶时 σ_α 与 σ_β 都是 0，这一步能把彩度一次性归零：
-
-| 迭代次数 | 直接训练 | 热启动后 |
+| 迭代次数 | 直接训练 | **热启动后** |
 |---|---|---|
 | 300 | 0.0453 | **0.00206** |
 | 1500 | 0.0218 | 0.00147 |
 | 5000 | 0.0107 | 0.00089 |
 
-300 次迭代好了 **22 倍**，loss 从 0.00715 降到 0.00081。
+而且把学习率从 0.02 提到 0.30 **几乎没有变化** —— 瓶颈在收敛路径长度，不在步长。
+β 标准差 0.03 在 lαβ 里已对应约 70 的 RGB 通道差，肉眼可见。
+
+**解法是解析法热启动**：先用逐通道矩匹配把每个格点直接算出来，再让梯度下降只做精修。
+因为灰阶风格时 σ_α 与 σ_β 都是 0，这一步能把彩度一次性归零。300 次迭代好了 **22 倍**。
 
 #### 实测结果
 
@@ -284,19 +148,292 @@ out = (src − μ_src) × (σ_ref / σ_src) + μ_ref
 
 | 指标 | 风格图 | 训练后的输出 |
 |---|---|---|
-| l 均值 | -0.7755 | -0.7852 |
-| l 标准差 | 0.7961 | 0.8073 |
+| l 均值 / 标准差 | -0.7755 / 0.7961 | -0.7852 / 0.8073 |
 | α 均值 / 标准差 | 0.0008 / 0.0001 | -0.0001 / 0.0022 |
 | β 均值 / 标准差 | 0.0001 / 0.0000 | 0.0003 / 0.0019 |
-| 平均彩度（RGB 通道差） | 0 | **3.27** |
+| **平均彩度** | 0 | **3.27** |
 
 统计量全部收敛到 0.02 以内，平均彩度 3.27 肉眼不可见。
-最大彩度 57 出现在 **2.29%** 的像素上 —— 那是训练微调明度时三通道步长不完全一致留下的偏色，
-属于已知残差。测试按「平均彩度 + 超标像素占比」两个指标卡，没有假装它是 0。
+最大彩度 57 出现在 **2.29%** 的像素上，属已知残差 —— 测试按「平均彩度 + 超标像素占比」两个指标卡，
+**没有假装它是 0**。
 
-### 一个曾经很隐蔽的坑：透明像素污染统计量
+### 3.3 端侧模型（按需下载）
 
-（这段保留，因为它是上一版解析式迁移里最花时间才找到的 bug，教训现在仍然成立。）
+#### 先说清楚：本地模型能做什么、不能做什么
+
+清单里 4 个模型，**没有一个是生成模型**：
+
+| 模型 | 大小 | 任务 | 输入 → 输出 |
+|---|---|---|---|
+| MODNet 量化版 | 6.3 MB | 抠图 | 图片 → 一张掩码 |
+| Swin2SR | 20.5 MB | 超分 | 图片 → 放大 2 倍的图片 |
+| RMBG-1.4 | 42.3 MB | 抠图 | 图片 → 掩码 |
+| U2Net | 167.8 MB | 抠图 | 图片 → 掩码 |
+
+**为什么生不出图**：抠图和超分是**分析/变换**类模型，输出像素全部来自输入；
+只有**生成**类模型（扩散、GAN）才会「画出」原本不存在的内容。两者是完全不同的东西。
+
+而生成类模型在端侧现实里拿不到：
+
+- 魔搭上按 AnimeGANv2/v3、CartoonGAN、AdaIN、fast-neural-style、Photo2Cartoon、UGATIT、
+  waifu2x、Real-CUGAN 等 **30 多个候选逐个找过，全部 404**；
+- 只发布 `.pth / .pt` 权重（PyTorch）的，Android 根本加载不了；
+- 真正的扩散模型动辄几百 MB 到几 GB，手机跑不动。
+
+**结论：想「用文字生成全新图标」只能走云端 API；端侧只能做抠图和超分。**
+
+#### 按需下载的实现
+
+**模型不打包进 APK，用户要用哪个才下哪个**，下完存在应用私有目录 `files/models/`，随时可删。
+下载走带 `Content-Length` 的接口（能做出真实进度条），先落 `.part` 再校验字节数、通过才改名，
+避免留下「看起来存在其实是半截」的模型文件。
+
+> **实测踩坑**：`onnxruntime-mobile` **不能加载标准 .onnx**，会抛
+> `ORT_INVALID_ARGUMENT: ONNX format model is not supported in this build`。
+> 它只认官方 Python 工具转出来的 `.ort` 格式，而转换必须在电脑上做。
+> 所以只能用完整版 `onnxruntime-android`，代价是 arm64 的 .so 就有 16.3 MB。
+> 默认只打 arm64，APK 因此从 9.95 MB 涨到 26 MB 左右；要在 x86_64 模拟器上测就加 `-PwithX86`。
+
+### 3.4 三级管线：抠图 → 主体风格化 → 合成
+
+端侧抠图模型的输出只是「背景被去掉的原图标」，**它本身不是新图标**。
+抠完必须再合成一次，才谈得上「生成」：
+
+```
+原图标 --[抠图模型]--> 主体(带 alpha)
+       --[本地风格，可选]--> 风格化主体
+       --[合成]--> 缩放进留白 + 画新背景 + 投阴影 + 切圆角 = 新图标
+```
+
+合成参数（都可调、都有默认值、都存盘）：
+
+| 参数 | 选项 | 默认 |
+|---|---|---|
+| 背景 | 透明 / 纯色 / 渐变 / 风格图 | 纯色 |
+| 配色预设 | 石墨 / 白 / 夜空 / 暖砂 / 薄荷 | 石墨 |
+| 主体大小 | 0.4 ~ 1.0 | 0.72 |
+| 圆角 | 0 ~ 0.5 | 0.22 |
+| 投影 | 开 / 关 + 浓度 0~0.8 | 开，0.35 |
+| 主体是否风格化 | 开 / 关 | 关 |
+
+### 3.5 云端 API 与 DeepSeek 拟物化描述
+
+支持 4 个服务商：**通义万相 / 豆包 SeedEdit / Google Gemini / OpenAI gpt-image-1**。
+Gemini 和 OpenAI 支持双图输入（原图标 + 风格参考图），万相和 SeedEdit 是单图接口，UI 里已说明。
+
+**DeepSeek 拟物化描述**（你提的思路，已实现）：
+
+```
+应用名 --[DeepSeek 文字模型]--> 详细的拟物化描述（材质/光影/配色/底托/细节）
+                                        |
+原图标 ----------------------------------+
+                                        v
+                            [生图模型 云端] --> 新图标
+```
+
+为什么需要这一步：生图模型对「把微信图标做成拟物化」这种一句话理解非常泛，出来千篇一律。
+先让 DeepSeek 把「拟物化」拆成具体的材质、光源、透视、配色、背景，再交给生图模型，差别很大。
+
+### 3.6 图标包 APK（手机内直接生成）
+
+以前要 `导出 zip → 拷到电脑 → 解压 → gradle 打包 → 装回手机`，现在点一下就好。
+
+**技术路线**：手写 AXML + 手写 `resources.arsc` + 自写带对齐的 ZIP + apksig v2 签名 + 手写 DER 自签名证书。
+全纯 Kotlin/JVM，**不依赖 aapt2、不依赖任何 Android 私有 API**。
+
+排除掉的两条路（有依据）：
+
+- `AssetManager.addAssetPath` 只能让运行时**读**已存在 APK 的资源，**不能凭空造资源表**；
+  而且图标包要给启动器读，必须自己产出 arsc。
+- 只打 assets 不写 arsc：启动器取图走 `Resources.getIdentifier(名字, "drawable", 包名)`，
+  没有 arsc 时**恒返回 0**，装得上但一个图标都换不了。
+
+`resources.arsc` 的格式是先拿 aapt2 的真实产物**逐字节反推**出来的，再照着重写编码器。
+
+**验证结果**（用平台工具链独立验证，不是自说自话）：
+
+| 检查 | 结果 |
+|---|---|
+| `aapt2 dump badging` | package / minSdk 26 / targetSdk 34 / label 全部正确 |
+| `aapt2 dump xmltree` | `hasCode(0x0101000c)=false` 编码正确 |
+| 启动器 action | **6 个全在**（adw / GO / Nova / Lawnchair / anddoes / teslacoilsw） |
+| `zipalign -c -v 4` | `Verification succesful` |
+| `apksigner verify` | **v2 scheme: true**，v1: false（正是预期） |
+| ZIP 条目 | **没有任何 .dex**，确认是纯资源包 |
+| 设备安装 | Android 16 模拟器 `adb install` → Success |
+
+应用内有**可展开的教程**（图标包是什么 / 怎么用 / 支持哪些启动器 / 签名与更新 / 体积耗时）。
+
+### 3.7 重新生成
+
+以前批量生成**总是**跳过已完成的，全部完成时只丢一句「所选范围内都生成过了」，
+生成完一轮之后想重做就没路了。现在：
+
+- 「**跳过已生成**」开关（默认开，关掉就是全部重做）
+- 独立的「**重新生成**」按钮，不管有没有生成过都重跑一遍
+- 提示语说清楚了该怎么做
+
+### 3.8 图标页的滚动（重要修复）
+
+**曾经的 bug**：整页是最外层 `Column`（不可滚动）+ 固定高度子项，
+配置面板一展开就吃掉 400~600dp，下面那个 `fillMaxSize` 的 LazyColumn 高度被挤到接近 0 ——
+列表既看不见也滚不动，用户只能先收起面板才能看到应用列表。
+
+**改法**：整个页面一个 `LazyColumn`（标题/引擎卡片/配置面板/操作栏/列表 全是它的 item），
+并删掉嵌套的第二层 LazyColumn。现在面板展开只是这一项变高，整页一起滚，
+**任何一块内容都不可能再吃掉别人的空间**。
+
+---
+---
+
+## 四、图表（第二优先）
+
+全部 Canvas 手绘，**没有引入任何图表库**。
+
+| 图表 | 实现要点 |
+|---|---|
+| 应用体积排行榜 | 圆角柱 + 行内选中态（整行 10% primary 底色 + 柱体加强）+ 排名徽标（第 1 名实心强调） |
+| L 型折线图 | **面积渐变填充** + 弱化网格线 + 选中竖线 + 环形游标（外圈用 surface 色挖空，深浅色都有层次） |
+| 体积分布直方图 | 圆角柱 + 纵向渐变，浓度随体积档位递增 |
+| 存储构成 | 一根堆叠条 + 三项图例 |
+
+**取色统一走 `ui/theme/ChartPalette.kt`（唯一取色口，零硬编码色值）。**
+多组数据只用「**同一色相 + alpha 浓度台阶**」，不引入新色相 —— 和「一套色相靠明度分层」的原则一致。
+深浅色判断用 `surface.luminance()` 而不是 `isSystemInDarkTheme()`，将来加手动切换也能跟上。
+
+**轴标签**：走 `nativeCanvas`（天生不换行），但字号做了 sp→px 换算、颜色取 `onSurfaceVariant`。
+Y 轴左边距按 `Paint.measureText` 实测（固定像素宽度在 `1024.0MB` 这种刻度下会压进图里）；
+上下留白按字号倍数算，**系统字体放大到 1.3 倍也不会把刻度顶出画布**。
+
+**手势**：点按和拖动共用一套 `pointerInput`。
+（`detectTapGestures` 会先消费 down 事件，和 `detectDragGestures` 分两个 pointerInput 会打架 —— 这点踩过并绕开了。）
+
+---
+
+## 五、统计界面（第三优先）
+
+重设计了信息层级，而不是堆卡片：
+
+- 顶部一张 `primaryContainer` 主卡只放**两个大数字**（32sp 应用总数 + 18sp 总占用），下面 10sp 小字分三栏
+- 其余卡片统一「白底 + 发丝线 + 12dp 内边距」，卡片间距 8dp、标题 14sp、正文 11~12sp
+- 分类分布和缓存 Top5 用「**条形当行背景**」的写法，一行同时表达名称、数值、相对大小
+- 「仅用户应用」筛选现在作用于**整页**（总览也用过滤后的列表重算），不再出现「上面全量、下面过滤」两套对不上的数字
+
+---
+
+## 六、应用列表与存储
+
+### 列表行（影响 258 行，密度收益最大）
+
+**曾经的 bug**：三个操作按钮**竖着**排在一个 Column 里，每个 32dp，单行至少 96dp；
+再加一个单独占一行的折叠箭头，**一行接近 110dp**。
+改成按钮横排、箭头并入主行、内边距 16→10 之后，单行压到 **约 50dp**。
+展开区里重复的「图标 + 应用名 + 包名」也删掉了（折叠态已经有了）。
+
+### 存储页
+
+存储构成拆成三个互补部分（应用本体 / 缓存 / 数据），都用**同一色相的 alpha 浓度台阶**区分，
+不再各用一个色相。没权限时明确说明「不计入比例」，而不是画两根 0% 的空条让人误以为「缓存为 0」。
+
+---
+
+## 七、设计系统
+
+### 7.1 配色
+
+**一套色相靠明度分层**。主色统一为同一个蓝（H≈215），不再出现「蓝色主色 + 紫色按钮 + 橙色高亮」这种各自为政。
+所有界面颜色走 MaterialTheme 语义 token，不写死色值。
+
+### 7.2 深色模式
+
+| 规则 | 做法 | 原因 |
+|---|---|---|
+| 不用纯黑 | 背景 `#12151A` | 纯黑背景下任何浅色文字都会「发光」 |
+| 正文不用纯白 | `#E2E5EA` | 降低亮度对比，长时间看不累 |
+| 强调色压暗提灰 | 主色 `#1B6EF3` → `#8FB6F0` | 明度降到 ~72%、饱和度减半。上一版是 `#9EC5FF`，凡是拿 primary 当文字/图标的地方都亮得扎眼 |
+| 分隔线低对比 | 用 `outlineVariant` | 它就是设计给低对比分隔线的，消除「亮线刺眼」 |
+
+窗口背景由 `values-night/themes.xml` 提供，避免深色下启动瞬间闪白。
+（框架主题里没有 `DayNight + NoActionBar` 的组合，aapt2 直接报 resource not found，用 `values-night` 资源限定符是框架原生做法。）
+
+### 7.3 全局紧凑模式
+
+**缩放 Compose 的 `LocalDensity`（0.85 倍）** —— 所有 dp/sp 一起等比缩小，
+**不需要逐页改代码，新增页面自动跟随**。
+
+系数取 0.85：屏幕能多放约 18% 内容，同时 12sp 正文还有 10.2sp 的等效大小、触摸目标仍大于 36dp。
+再往上压（比如 0.75）触摸目标会小于 36dp，不好点。
+
+### 7.4 响应式
+
+`ui/util/AdaptiveLayout.kt`：
+
+- **三档屏幕**：COMPACT（<600dp）/ MEDIUM（600~839dp）/ EXPANDED（≥840dp），参考 Material 3 window size class
+- **`AdaptiveScaffold`**：超过 720dp 就把内容**限宽居中**。手机上 maxWidth 本来就小于 720dp，**等于完全没有影响**；
+  平板上避免一行文字被拉满整块屏幕
+- 档位通过 `CompositionLocal` 提供，页面内需要多列布局时可以直接读
+- 取的是 `screenWidthDp` 而不是 `widthDp` —— 多窗口/分屏下 widthDp 会变小，而我们要判断的是「这台设备有多大」
+
+### 7.5 文字不换行
+
+标签和按钮文字**一律 `maxLines = 1` + Ellipsis，配 `softWrap = false`**。
+覆盖：FilterChip / Tab / 按钮文字 / 统计项名称 / 图表轴标签 / 图例 / 分段选择器。
+
+原则是「**数值优先完整、标签可省略**」—— 反过来数字被截断就没意义了。
+分段选择器是自绘的（每段 5dp 纵向内边距），比 FilterChip 窄很多，320dp 窄屏也放得下。
+
+---
+
+## 八、设置与关于
+
+- **关于**入口在设置页「其他」分组（带说明文字和右箭头），内容就是本 README。
+  README 放在 `app/src/main/assets/README.md` 随 APK 打包 —— **文档只有一份**，改 README 不用同步改代码。
+  显示是纯文本 + 简易 Markdown 渲染（标题/代码/引用/列表/表格分档处理），不是完整渲染表格。
+- 设置页还有：**全局紧凑开关**、DeepSeek API Key、网络状态。
+- API Key **只存在本机 SharedPreferences**，绝不编译进 APK。
+
+---
+---
+
+## 九、数据诚实性（贯穿全局的硬约束）
+
+这个应用最容易犯的错误是**在拿不到数据时编一个数出来**。当前实现对这件事有硬约束。
+
+### 9.1 没有权限就显示「—」
+
+`StorageStatsManager` 需要「使用情况访问」权限，没有它系统不允许读取其他应用的数据目录。
+
+- **老实现**：拿不到就读 `File(dataDir)` → 必然失败返回 0 → 于是用 `apkSize * 0.2` 当缓存、
+  `apkSize * 1.0` 当数据「估算」出来，并当成测量值展示。
+  实测在 258 个应用的机器上，未授权时统计页显示 **8.0 GB**，而真实值是 **2.9 GB** —— 虚高 2.76 倍，
+  用户完全无从分辨。
+- **现实现**：读不到就是读不到，UI 统一显示「—」并提示需要授权。
+
+### 9.2 缓存不会被算两遍
+
+Android 官方文档（`StorageStats.getDataBytes()`）明确写明：
+
+> Return the size of all data. This includes files stored under Context.getDataDir(), **Context.getCacheDir()**, Context.getCodeCacheDir().
+
+也就是说 **dataBytes 已经包含 cacheBytes**。老实现做 `appSize + dataSize + cacheSize` 求和，
+把缓存重复计算了一次。现在 `dataSize = dataBytes - cacheBytes`，三个字段互不重叠。
+
+### 9.3 应用体积用 APK 文件的直接 stat 值，不用 appBytes
+
+这里走过一次弯路：一度以为 `StorageStats.getAppBytes()` 更准确，就换了过去。
+结果实测发现它**只统计默认卷（/data）上的代码，不包含预装在只读分区（/product）上的 APK**：
+
+| 应用 | APK 真实大小 | 用 appBytes 后显示 |
+|---|---|---|
+| Photos | 168.4 MB | 排不进前 11（< 6.5 MB） |
+| Google Play services | 190.2 MB | 52.2 MB |
+
+所有系统应用体积集体缩水，应用本体总和从真实的 **2.68 GB** 掉到 **0.2 GB**。
+所以现在用 `File(sourceDir).length()`（含 split APK）—— 直接读文件大小，与分区无关，永远是真值。
+
+### 9.4 一个曾经很隐蔽的坑：透明像素污染统计量
+
+（保留这段，因为它是上一版解析式迁移里最花时间才找到的 bug，教训现在仍然成立。）
 
 应用图标有大量**全透明**像素（实测 Google 图标占 **21.5%**），它们的 RGB 是 (0,0,0)，
 经 log10 变换后 l 会掉到 **-6.9** 这种极端值。第一版实现把这 21.5% 也算进统计量，
@@ -304,102 +441,92 @@ out = (src − μ_src) × (σ_ref / σ_src) + μ_ref
 σ 虚高 11 倍 → 输出层次被压缩到 **1/11** → 图标塌成一块纯色（实测 55% 的像素变成同一个颜色）。
 
 **现在的做法**：统计量只算不透明像素（alpha ≥ 8）；透明像素原样保留；
-log10 输入下限从 1e-4 改成 1/255。四类风格和 k-means 取主色都遵守这条规则。
-
-### 提示词是怎么拼的
-
-
-
-`ImageGenService.buildPrompt()` 把三段拼在一起：
-
-1. 应用名：「这是手机应用「微信」的图标。」
-2. 风格指令：`IconStyle.editInstruction`（8 种风格各一句，就是页面选的那个）
-3. 通用约束：正方形构图、不要文字、不要边框、小尺寸下要清晰
-4. 用户填的特征：`额外要求：圆角方形底、保留品牌主色…`
-
-超过服务商上限（万相 800 字）会自动截断，截断时保留开头和结尾 —— 结尾是用户填的最具体的
-那句，不能被丢掉。
-
-> `IconStyle.editInstruction` 这个字段在早期版本里叫 `promptTemplate`，内容是
-> 「为{name}设计霓虹风格图标…」，但**全项目没有任何一行代码引用它**，纯粹是摆设。
-> 现在它由 `ImageGenService` 真实消费。
+log10 输入下限从 `1e-4` 改成 `1/255`。四类风格和 k-means 取主色都遵守这条规则。
 
 ---
 
-## 导出图标包（批量替换桌面图标）
+## 十、性能：几个曾经很致命的坑
 
-### 先说清楚能做到什么
+### 10.1 属性访问器里做文件系统 IO
 
-Android **不允许**一个普通应用直接修改其他应用的图标 —— 那需要系统签名或 root。
-所以「批量替换」的现实做法是导出一个**图标包（icon pack）**，由支持图标包的启动器统一应用。
+`IconReplaceService.storageDir` 原本是个 `get()` 属性，每次访问都执行
+`getExternalFilesDir()` + `mkdirs()`。258 个应用回填时这个开销被放大到 **11 秒**。
+改成 `by lazy` 之后，同一个操作 **11003 ms → 115 ms**。
 
-**支持图标包的启动器**：Nova、Smart Launcher、ADW、Lawnchair、Apex、GO 等。
-**不支持**：Pixel 原生启动器（装上了也选不了）。
+### 10.2 进入页面时给前 50 个应用各做一次 512px 图标流水线
 
-### 流程
+原来是「取图标 → 缩放 512 → PNG 压缩 → 写盘 → Base64」全部预跑一遍，好几秒。
+改成**按需加载**：列表只用 64px 缩略图（带 LruCache），512px 原图只在真正生成时才取。
+列表因此从「前 50 个」放开到**全部 258 个**。
 
-1. 手机端：「图标」页 → 选风格 → 填特征 → 批量生成 → 点「导出图标包」
-   → 在 **下载/AppAnalyzerIconPack/** 得到一个 ZIP
-2. 电脑端：把 ZIP 解压到 `iconpack/src/main/generated/`（解压后该目录下应直接出现
-   `assets/` 和 `res/` 两个文件夹）
-3. 电脑端：`gradlew :iconpack:assembleDebug`
-   → `iconpack/build/outputs/apk/debug/iconpack-debug.apk`
-4. 装到手机，在启动器的「图标包 / 主题」设置里选中它
+### 10.3 其他
 
-### ZIP 里有什么
+- `DebugLogger` 文件写入移出主线程 + 2 MB 轮转
+- `AppItem` 里每个列表项自己 new 一个 `AppInfoService`（每个还带一个 OkHttpClient 和线程池）
+  → 改成由调用方传入，258 个应用不再 new 258 次
+- 图标页清点结果从「258 次逐个查文件存在」改成目录列表（实测 620 ms → 个位数 ms）
 
-| 文件 | 用途 |
+---
+
+## 十一、测试
+
+**151 个用例，10 个测试文件，全部纯 JVM 不需要模拟器**。
+
+| 测试文件 | 用例 | 覆盖 |
+|---|---|---|
+| `AnalysisServiceTest` | 13 | 统计计算、分布分档边界 |
+| `AppClassifierTest` | 12 | 分类规则：包名/应用名/权限/内置分类/兜底 |
+| `AppInfoServiceTest` | 5 | AI 分类落地与计数口径 |
+| `FormatUtilTest` | 11 | 体积格式化边界（0/负数/1024 倍数/Long.MAX） |
+| `SizeUnitTest` | 8 | 单位换算与 Locale |
+| `IconComposerTest` | 11 | 合成：四种背景/留白/圆角/投影/alpha 混合/兜底 |
+| `LocalStyleRendererTest` | 10 | 四类风格：纯色图无线条/边界有线/颜色数上限/众数滤波 |
+| `LocalModelCatalogTest` | 11 | 模型清单完整性、下载地址合法性 |
+| `ImageGenProviderTest` | 9 | 服务商常量、id 合法性、提示词截断 |
+| `ImageGenServiceTest` | 14 | 提示词拼接、引擎判断、配置回退 |
+| `iconpack/` 下 7 个 | 47 | AXML / arsc / ZIP 编码、签名、aapt2 交叉验证 |
+
+### 关于「方便后续调用」的接口设计
+
+每个算法模块都留了**纯像素入口**，不依赖 Android，可以脱离 App 直接调：
+
+| 接口 | 作用 |
 |---|---|
-| `assets/appfilter.xml` | **启动器真正读的那份**：组件名 → 图标资源名 的映射 |
-| `res/xml/appfilter.xml` | 同样的内容，给读 res 的图标包面板用 |
-| `assets/drawable.xml`、`res/xml/drawable.xml` | 图标清单 |
-| `res/drawable-xxhdpi/ic_<包名>.png` | 192×192 的图标 |
-| `meta.json`、`README.txt` | 元信息与操作说明 |
+| `LocalStyleRenderer.renderPixels(...)` | 四类风格处理 |
+| `IconComposer.composePixels(...)` | 合成 |
+| `ColorLutModel.train(...) / .apply(...)` | 小模型训练与推理 |
+| `AppClassifier.classify(...)` | 应用分类（纯数据进出） |
+| `IconPackApkBuilder.build(...)` | 图标包 APK 打包（纯 JVM） |
 
-appfilter.xml 里每个图标会写**两条**映射（完整组件名 + `包名/.Activity` 缩写形式），
-因为不同启动器对 ComponentInfo 的匹配方式不完全一致，两条都写能显著提高命中率。
-
-图标包 APK 的 manifest 里声明了 `org.adw.launcher.THEMES` 等 5 个 intent-filter action，
-这是启动器识别图标包的依据。
-
-### 为什么要在电脑上打包
-
-图标包 APK 需要 `res/drawable` 里的资源被 **aapt2 编译进 resources.arsc**，
-而 Android 应用在运行时没有 aapt2，也无法凭空生成 resources.arsc。
-所以手机负责生成图片和映射表，电脑用标准工具链打包 —— 这也是所有图标包作者的做法。
+**测试里独立实现了 lαβ 变换和 AXML/arsc 解析器**，不复用被测代码 —— 否则就成了自己验证自己，
+偏移写错也会「自洽地读回来」。
 
 ---
+---
 
-## 构建 APK
+## 十二、构建与运行
 
 ### 方式一：双击一键脚本（推荐）
 
-直接双击项目根目录的 **`build-apk.bat`**。它会自动：
+双击项目根目录的 **`build-apk.bat`**。它会自动：
 
-1. 找到 JDK —— 依次尝试已有的 `JAVA_HOME` → Android Studio 自带的 JBR
-   （`C:\Program Files\Android\Android Studio\jbr`、`D:\...`、`%LOCALAPPDATA%\Programs\...`）
-   → `C:\Program Files\Java\jdk-17`
+1. 找到 JDK —— 依次尝试已有的 `JAVA_HOME` → Android Studio 自带的 JBR → `jdk-17`
 2. 找到 Android SDK（`ANDROID_HOME` 或 `%LOCALAPPDATA%\Android\Sdk`）
-3. 编译 `:app` 和 `:iconpack` 两个模块
-4. 打印产物路径和安装命令
+3. 编译 `:app` 和 `:iconpack` 两个模块，打印产物路径和安装命令
 
-> ⚠️ **最常见的坑**：本机 PATH 里没有 `java`，`JAVA_HOME` 也没设。
-> 这时直接双击 `gradlew.bat` 会立刻报
-> `ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH`。
-> 用 `build-apk.bat` 就不会有这个问题，它自己会去找 Android Studio 自带的 JDK。
+> **最常见的坑**：本机 PATH 里没有 `java`，`JAVA_HOME` 也没设。
+> 这时直接双击 `gradlew.bat` 会立刻报 `ERROR: JAVA_HOME is not set`。
+> 用 `build-apk.bat` 就不会有这个问题。
 
-### 配套脚本（只有这三个，各司其职）
+### 配套脚本（只有三个，各司其职）
 
 | 脚本 | 作用 |
 |---|---|
-| `build-apk.bat` | **构建 APK**。自动定位 JDK 与 SDK，编译 `:app` + `:iconpack`，打印产物路径 |
-| `run-app.ps1` | **构建并跑起来**：`-Run` 启动模拟器 → 编译 → 安装 → 启动应用；`-Build` 只编译；`-Stop` 停模拟器 |
-| `open-studio.bat` | 用 Android Studio 打开本项目（路径取自脚本自身位置，项目移动也不会坏） |
+| `build-apk.bat` | 构建 APK，自动定位 JDK 与 SDK |
+| `run-app.ps1` | 构建并跑起来：`-Run` 启动模拟器→编译→安装→启动；`-Build` 只编译；`-Stop` 停模拟器 |
+| `open-studio.bat` | 用 Android Studio 打开本项目（路径取自脚本自身位置） |
 
-> 早先还有 `一键构建.bat`、`check-env.bat`、`check-env.ps1`、`wait-and-build.ps1` 等，
-> 要么只是转发、要么互相重复、要么硬编码了过时的 build-tools 版本，已经删掉了。
-
-### 方式二：手动敲命令
+### 手动敲命令
 
 ```powershell
 cd D:\zjc20\Documents\android-app-analyzer
@@ -407,275 +534,144 @@ $env:JAVA_HOME = 'D:\Program Files\Android\Android Studio\jbr'
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 
 .\gradlew.bat assembleDebug :iconpack:assembleDebug
+.\gradlew.bat :app:testDebugUnitTest        # 跑 151 个单元测试
+```
+
+### ABI 与体积
+
+ONNX Runtime 的原生库很大（arm64 16.3 MB、x86_64 18.1 MB）。**默认只打 arm64-v8a**。
+要在 x86_64 模拟器上调试就加 `-PwithX86`：
+
+```powershell
+.\gradlew.bat assembleDebug -PwithX86
 ```
 
 ### 产物
 
 | 模块 | 路径 | 说明 |
 |---|---|---|
-| 主程序 | `app/build/outputs/apk/debug/app-debug.apk` | **可直接安装**（用调试签名） |
-| 图标包 | `iconpack/build/outputs/apk/debug/iconpack-debug.apk` | 需先导出图标再构建，否则只有占位图 |
-
-### 安装到手机
-
-手机打开「开发者选项 → USB 调试」，用数据线连电脑，然后：
-
-```powershell
-$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
-& $adb install -r app\build\outputs\apk\debug\app-debug.apk
-```
-
-也可以把 APK 直接拷到手机上点击安装（需要允许「安装未知来源应用」）。
-
-调试时想省掉手动授权那一步（**仅限调试**）：
-
-```powershell
-& $adb shell appops set com.appanalyzer GET_USAGE_STATS allow
-```
-
-### 关于 release 包
-
-`gradlew assembleRelease` 能跑通，但产物是 `app-release-unsigned.apk` ——
-**未签名，装不上**。要发布需要自己在 `app/build.gradle` 里加 `signingConfigs`：
-
-```groovy
-android {
-    signingConfigs {
-        release {
-            storeFile file("你的.keystore")
-            storePassword "***"
-            keyAlias "***"
-            keyPassword "***"
-        }
-    }
-    buildTypes {
-        release { signingConfig signingConfigs.release }
-    }
-}
-```
-
-生成密钥库：`keytool -genkeypair -v -keystore my.keystore -alias appanalyzer -keyalg RSA -keysize 2048 -validity 10000`
-
-> `app/proguard-rules.pro` 之前被 `build.gradle` 引用但**文件并不存在**，已补上。
-> 目前 `minifyEnabled = false` 所以没暴露问题，一旦打开混淆就会直接构建失败。
+| 主程序 | `app/build/outputs/apk/debug/app-debug.apk` | 约 29 MB，可直接安装（调试签名） |
+| 图标包 | `iconpack/build/outputs/apk/debug/iconpack-debug.apk` | 占位包，实际用 App 内的「打包成 APK」 |
 
 ---
 
-## 项目结构
+## 十三、项目结构
 
 ```
 app/src/main/java/com/appanalyzer/
-├── MainActivity.kt                      # 入口，只负责 setContent
-├── data/model/
-│   ├── AppInfo.kt                       # 应用信息（含 hasSizeDetail 标志）
-│   ├── StatisticsInfo.kt                # 统计结果
-│   └── DeepSeekModels.kt                # API 请求/响应模型
+├── MainActivity.kt              入口：AppTheme + 全局紧凑 + MainScreen
+├── data/model/                  数据类（AppInfo / StatisticsInfo / DeepSeekModels）
 ├── service/
-│   ├── AppInfoService.kt                # 枚举应用 + 测量体积 + 本地分类 + AI 分类编排
-│   ├── AnalysisService.kt               # 纯计算：统计与分布
-│   ├── DeepSeekService.kt               # 两步式 AI 分类（文本模型）
-│   ├── IconReplaceService.kt            # 图标风格定义 + 本地绘制引擎 + 结果落盘
-│   ├── IconPackExporter.kt              # 导出图标包 ZIP（appfilter.xml + PNG）
-│   ├── PreferencesManager.kt            # SharedPreferences + 各类缓存与设置
-│   ├── DebugLogger.kt                   # 文件日志（2MB 轮转）
-│   └── imagegen/
-│       ├── ImageGenProvider.kt          # 生图服务商抽象 + 请求/结果模型 + 共享 HTTP 客户端
-│       ├── RemoteProviders.kt           # 万相 / SeedEdit / Gemini / OpenAI 四个实现
-│       └── ImageGenService.kt           # 拼提示词 + 调用 + 归一化 + 落盘
-├── ../iconpack/                         # 独立 Gradle 模块：把导出的 ZIP 打成图标包 APK
+│   ├── AppInfoService.kt        枚举应用、测量体积、加载图标、AI 分类落地
+│   ├── AppClassifier.kt         ★ 纯逻辑分类器（零 Android 依赖，可单测）
+│   ├── AnalysisService.kt       统计汇总
+│   ├── PreferencesManager.kt    全部持久化设置
+│   ├── DebugLogger.kt           文件日志 + 轮转
+│   ├── DeepSeekService.kt       AI 分类 + 拟物化描述生成
+│   ├── IconReplaceService.kt    生成结果落盘、原图缓存、尺寸归一化
+│   ├── IconPackExporter.kt      导出图标包 ZIP
+│   ├── image/                   ★ 本地风格算法
+│   │   ├── LocalStyleRenderer.kt    四类风格（纯像素入口 renderPixels）
+│   │   ├── ColorLutModel.kt         本地训练的颜色查找表模型
+│   │   ├── StyleModelStore.kt       模型缓存与训练调度
+│   │   ├── IconComposer.kt          ★ 抠图之后的合成（纯像素入口 composePixels）
+│   │   └── StyleLibrary.kt          风格参考图库
+│   ├── imagegen/                云端 API 与引擎调度
+│   ├── localmodel/              端侧 ONNX 模型（清单/下载/推理）
+│   └── iconpack/                ★ 手机内打包图标包 APK
+│       ├── BinaryXml.kt             AXML 编码器
+│       ├── ResourceTable.kt         resources.arsc 编码器
+│       ├── ZipWriter.kt             带对齐的 ZIP
+│       ├── Signing.kt               自签名证书 + apksig v2
+│       ├── IconPackApkBuilder.kt    核心（纯 JVM）
+│       ├── IconPackApkService.kt    Android 侧（密钥落盘、写下载目录）
+│       ├── IconPackTutorial.kt      应用内教程文案
+│       └── IconPackUi.kt            教程卡片 + 打包对话框
 └── ui/
-    ├── screens/                         # 6 个页面 + 设置弹窗
-    ├── components/                      # AppItem / StatItem / StatRow / StorageBar / StorageItem
-    ├── icons/AppIcons.kt                # 自己实现的 Material 图标（见下）
-    └── util/                            # 体积格式化（Locale.US，未知显示 —）
+    ├── theme/AppTheme.kt        浅色/深色配色（一套色相靠明度分层）
+    ├── theme/ChartPalette.kt    图表唯一取色口（零硬编码色值）
+    ├── util/AppDensity.kt       全局紧凑（缩放 LocalDensity）
+    ├── util/AdaptiveLayout.kt   三档屏幕 + 限宽居中
+    ├── icons/AppIcons.kt        33 个手写矢量图标（替代 material-icons-extended）
+    ├── components/              StatCard / DataBar / AppItem / StorageBar 等
+    └── screens/                 MainScreen · AppList · Statistics · Storage · Chart · DebugLog · IconReplace · Settings · About
 ```
-
-**没有 ViewModel，没有 Navigation-Compose。** 全部状态集中在 `MainScreen.kt` 里，
-页面通过 `when(selectedTab)` 切换，服务对象由 `MainScreen` 创建后向下传递。
-`build.gradle` 里仍声明着 `navigation-compose` 和 `lifecycle-viewmodel-compose`
-但源码中零引用，属于可以清理的死依赖。
 
 ---
 
-## 图标：为什么不用 material-icons-extended
+## 十四、已知限制
 
-官方依赖 `androidx.compose.material:material-icons-extended` 的 aar 有 **34 MB**，
-它把两千多个图标每个都生成为一个 Kotlin 对象。而本项目 `minifyEnabled = false`，
-R8 不会剔除未使用的类，于是整个库都被编进 dex。
-
-实测（同一份代码，只切换这一个依赖，两次都 `clean` 后全量构建）：
-
-| | APK 体积 | dex 原始体积 |
-|---|---|---|
-| 带 material-icons-extended | 16.30 MB | 57.0 MB |
-| 已移除 | **9.71 MB** | 25.3 MB |
-| | **减少 6.59 MB（-40.4%）** | |
-
-现在项目用的图标分两部分：
-
-1. **material-icons-core 里自带的**（随 material3 传递进来，体积很小，49 个常用图标）
-   —— 直接用 `Icons.Default.Xxx`，例如 `Icons.Default.Settings`。
-2. **core 里没有的** —— 放在 `ui/icons/AppIcons.kt`，用 `AppIcons.Xxx` 调用。
-
-`AppIcons.kt` 里的 path 数据取自 Google 官方 24px SVG
-（`fonts.gstatic.com/s/i/materialicons/<名字>/v<N>/24px.svg`），用脚本把 SVG path 指令
-逐条翻译成 Compose 的 `PathBuilder` 调用，**没有手工描摹**。转换结果是逐点验证过的：
-33 个图标、819 段路径，绝对坐标序列与官方 SVG 完全一致。
-
-**要加新图标时**：
-
-1. 先看 core 里有没有（`Icons.Default.Xxx`），有就直接用；
-2. 没有就去 <https://fonts.google.com/icons> 找（风格选 Material Icons → Filled），
-   把 24px SVG 里 `<path d="...">` 的指令照 `AppIcons.kt` 里的写法翻译过来。
-
-## 端侧模型（按需下载）
-
-### 先说清楚：本地模型现在**能做什么、不能做什么**
-
-清单里一共 4 个模型，**没有一个是生成模型**：
-
-| 模型 | 任务 | 输入 → 输出 |
-|---|---|---|
-| MODNet 量化版（6.3 MB） | 抠图 | 图片 → **一张掩码** |
-| RMBG-1.4（42.3 MB） | 抠图 | 图片 → 掩码 |
-| U2Net（167.8 MB） | 抠图 | 图片 → 掩码 |
-| Swin2SR（20.5 MB） | 超分 | 图片 → **放大 2 倍的图片** |
-
-**为什么生不出图**：抠图和超分都是**分析 / 变换**类模型 —— 它们把输入图变成掩码或放大图，
-输出的像素信息全部来自输入。**生成**类模型（扩散、GAN）才会「画出」原本不存在的内容。
-两者是完全不同的东西，装多少个抠图模型都变不出生成能力。
-
-而生成类模型在端侧现实里拿不到：
-
-- 魔搭上按 AnimeGANv2/v3、CartoonGAN、AdaIN、fast-neural-style、Photo2Cartoon、UGATIT、
-  waifu2x、Real-CUGAN 等 **30 多个候选逐个找过，全部 404**；
-- 那些只发布 `.pth / .pt` 权重（PyTorch），Android 上根本加载不了；
-- 真正的扩散模型动辄几百 MB 到几 GB，手机上跑不动。
-
-所以：**想「用文字生成全新图标」，只能走云端 API。端侧只能做抠图和超分。**
-这一点在 UI 里也直接写出来了，没有藏着。
-
-### 按需下载
-
-**模型不打包进 APK，用户要用哪个才下哪个**，下完存在应用私有目录 `files/models/`，可以随时删掉。
-
-内置清单（4 个，下载 URL 与文件大小**全部实测过**：HTTP 200 + 字节数一致）：
-
-| 模型 | 大小 | 用途 | 许可证 |
-|---|---|---|---|
-| MODNet 量化版 | 6.3 MB | 抠图 | Apache-2.0 |
-| Swin2SR | 20.5 MB | 超分 x2 | Apache-2.0（上游） |
-| RMBG-1.4 量化版 | 42.3 MB | 抠图 | Bria 非商用 |
-| U2Net | 167.8 MB | 通用显著性抠图 | Apache-2.0 |
-
-下载走 `/api/v1/models/{ns}/{name}/repo?Revision=master&FilePath=...`（带 Content-Length，
-能做真实进度条；`/models/.../resolve/...` 那种是 302 到 OSS 的 chunked 响应，拿不到总大小）。
-下完先落 `.part` 再校验字节数、通过才改名，避免留下"看起来存在其实是半截"的模型文件。
-
-### 实测结论与三个必须知道的限制
-
-**1. 为什么模型源只能用魔搭。** 在你机器上实测：
-
-| 站点 | 可达性 |
-|---|---|
-| huggingface.co / cdn-lfs.huggingface.co | ❌ 不可达（SSL 建连失败） |
-| github.com / objects.githubusercontent.com | ❌ 不可达 |
-| dl.google.com / tfhub.dev | ❌ 不可达 |
-| **modelscope.cn（魔搭）** | ✅ 323 ms |
-| **gitee.com** | ✅ 146 ms |
-
-所有教程里默认的 HuggingFace / GitHub 直链在这台机器上一条都连不上。
-
-**2. `onnxruntime-mobile` 不能加载标准 `.onnx`（实测踩坑）。**
-用它加载会直接抛：
-
-```
-ORT_INVALID_ARGUMENT: ONNX format model is not supported in this build.
-```
-
-mobile 版只认官方 Python 工具转出来的 `.ort` 格式，而格式转换必须在电脑上做、手机端做不到。
-所以「按需下载任意 .onnx 模型」只能配完整版 `onnxruntime-android`。
-代价是原生库很大：**arm64-v8a 16.3 MB、x86_64 18.1 MB**（`.so` 不压缩）。
-默认只打 arm64，APK 因此从 9.95 MB 变成 **26.11 MB**；要在 x86_64 模拟器上测就加 `-PwithX86`（44.2 MB）。
-
-**不想要这个功能的话，把 `app/build.gradle` 里那一行 `onnxruntime-android` 删掉即可**，
-体积会立刻回到 10 MB 左右，其余功能不受影响。
-
-**3. 端侧没有可用的「图生图 / 风格迁移」模型。**
-在魔搭上按 AnimeGAN、CartoonGAN、AdaIN、fast-neural-style、Photo2Cartoon、UGATIT 等
-30 多个候选逐个试过，**全部 404（模型不存在）**。端侧现实可做的只有**抠图**和**超分**；
-要"用文字生成新图标"只能走云端 API。
-
-### 已验证到什么程度（不夸大）
-
-| 环节 | 状态 |
-|---|---|
-| 模型下载（6.3 MB，MODNet 量化版） | ✅ 实测完整下载，落盘 6,632,188 字节与清单一致 |
-| ONNX 会话建立 | ✅ 实测日志 `会话已建立：输入=[input] 输出个数=1`，与模型真实张量签名一致 |
-| 推理执行 + 输出成图 | ✅ 实测产出 192×192 PNG，无异常 |
-| **抠图效果** | ⚠️ **用 MODNet 时对图标无效** —— 掩码实测平均 alpha 255/255、100% 全不透明，等于没抠。MODNet 是人像抠图模型，本来就不适合 App 图标。真正合适的 U2Net（167.8 MB）已列入清单但未做效果验证 |
-| 超分（Swin2SR） | ⚠️ 未实测（20.5 MB 未下载） |
-
-> ⚠️ **移除依赖后必须 `gradlew clean`**。
-> 我在实测中踩到过：只是删掉 build.gradle 里那一行再构建，AGP 的增量 dex 合并会把旧产物
-> 留在 APK 里 —— 未压缩 dex 确实从 44 MB 降到了 25 MB，但 APK 体积纹丝不动（17.07 MB），
-> 里面藏着约 6.9 MB 的死数据。`clean` 之后才真正降到 9.71 MB。
-
----
-
-## 性能：两个曾经很致命的坑
-
-### 1. 属性访问器里做文件系统 IO
-
-`IconReplaceService` 里原本是：
-
-```kotlin
-private val storageDir: File
-    get() = File(context.getExternalFilesDir("icons") ?: context.filesDir, "generated").also { it.mkdirs() }
-```
-
-`get()` 属性**每次读取**都要执行一遍 `getExternalFilesDir()`（过一次 StorageManager）
-外加一次 `mkdirs()`。图标页要给全部 258 个应用回填生成结果，就是 500 多次文件系统调用 ——
-实测**光这一项吃掉 11 秒**。
-
-改成 `by lazy` 只做一次，并且把「逐个 File.exists()」换成「列一次目录拿集合」，
-同一操作 **11003 ms → 115 ms**。
-
-### 2. 进入页面时给前 50 个应用各做一次 512px 图标流水线
-
-取图标 → 缩放 512×512 → PNG 压缩 → 写盘 → Base64，一个大概几十毫秒，50 个就是好几秒，
-而且每次切到这个页面都重来一遍。
-
-现在：列表只建轻量条目（**258 个耗时 7~11 ms**），缩略图由每行按需懒加载（64px），
-512px 原图**只在真正点「生成」时才取**并缓存到磁盘。
-
-> 这也是原来「图标只有前 50 个」的原因 —— 上限本来就是被这个开销逼出来的。开销没了，上限也就去掉了。
-
-另外 `DebugLogger` 的文件写入也从主线程挪到了单独的写线程（每写一行 open/close 一次文件，
-而日志调用点大量在主线程上）。
-
----
-
-## 已知限制
+### 功能层面
 
 - **旋转屏幕会丢失全部状态**（筛选、排序、图表选项），因为用的是 `remember` 而非 `rememberSaveable`。
 - **切换 Tab 也会重置页面内的筛选/排序状态**（`when` 分支会销毁重建 Composable）。
-- **文本全部硬编码在代码里**，没有走 `stringResource`。`res/values/strings.xml` 里的
-  40 多条字符串目前是零引用。
-- **不扫描设备文件系统**：「存储」页只汇总应用占用，不做照片/视频/大文件分类。
-- **不统计设备总容量/剩余空间**（需要 `MANAGE_EXTERNAL_STORAGE` 或 `StorageStatsManager`
-  的卷级接口，目前未接入）。
 - **AI 分类最多发送 200 个应用名样本**用于生成标签，超出部分不参与标签定义（但仍参与分类）。
-- **图标生成的远程服务商未经端到端实测**：四个 provider 都是严格按各自官方文档实现的，
-  端点用无凭据请求验证过（返回 401/403 而不是 404，说明路径正确），通义万相的请求体也已在
-  设备上实际发出并收到服务端 `401 InvalidApiKey`（说明 URL、鉴权头与 JSON 结构都能被正确解析），
-  但**没有可用的 Key 完成一次真实的出图**。第一次配好 Key 后建议先对单个应用点一次生成，
-  失败时应用会把 HTTP 状态码和**服务端原始响应**直接显示在列表项下面，照着一改即可。
+- **颜色/字符串硬编码在代码里**，没有走 `stringResource`（`strings.xml` 只保留 manifest 用到的 `app_name`）。
+- **不扫描设备文件系统**：「存储」页只汇总应用占用，不做照片/视频/大文件分类。
+- **不统计设备总容量/剩余空间**。
+
+### 图标层面
+
+- **拟物化只是光照近似**，画不出真正的材质纹理。
+- **端侧没有生成模型**（见 §3.3）。
+- **抠图模型对图标效果差**：实测 MODNet 在图标上的掩码 100% 全不透明。
+  更合适的 U2Net（167.8 MB）**还没做效果验证**。
+- **云端服务商未经端到端实测**：4 个 provider 都严格按各自官方文档实现，
+  端点用无凭据请求验证过（返回 401/403 而不是 404，说明路径正确），
+  但**没有可用的 Key 完成一次真实的出图**。首次配好 Key 后建议先对单个应用点一次生成。
+
+### 图标包层面
+
+- **没有用真实第三方启动器（Nova / Lawnchair 等）验证**：模拟器里没有启动器。
+  用的是平台自身的解析路径（`query-activities` + `getResourcesForApplication`），
+  这正是启动器取图标依赖的机制，但具体启动器版本的实际表现没测到。
+- 教程里的启动器支持清单来自通用认知、**未逐版本核实**，App 内已注明「以官方说明为准」。
+- **PNG 只校验 8 字节 magic**，损坏但带正确 magic 的图仍会被打进去（启动器里显示不出来）。
+- **卸载本应用会丢失签名密钥**，之后打的包签名不同，必须先卸载手机上的旧图标包。
 - **图标包依赖启动器支持**：Pixel 原生启动器不支持第三方图标包。
 - **批量替换不是「直接改系统图标」**：Android 不提供这种能力，只能通过图标包由启动器应用。
+
+### 界面层面
+
+- **GUI 观感未经验证**：我无法查看渲染结果，只能保证编译通过和数值上的尺寸变化。
+  配色、间距、手感需要实际装上确认。
+- 统计页与图表页是子代理「盲改」的（同样看不到渲染）。
+
+---
+
+## 十五、更新日志
+
+### 1.2.0（2026-10-14）
+
+- 图标包 APK 可在**手机内直接生成**（手写 AXML/arsc/ZIP + apksig v2 签名）+ 应用内教程
+- 统计页（327→542 行）与图表页（418→695 行）**重设计**，新增 ChartPalette/StatCard/DataBar
+- **全局紧凑模式**（缩放 LocalDensity，覆盖所有页面，新增页面自动跟随）
+- **配色与深色模式重做**：一套色相靠明度分层；深色不纯黑、正文不纯白、强调色压暗提灰
+- **响应式布局**：三档屏幕 + 宽屏限宽居中
+- **文字不换行**：Chip/Tab/按钮/轴标签/图例一律 maxLines=1
+- **三级管线**：抠图 → 主体风格化 → 合成
+- **DeepSeek 生成拟物化描述**，再交给生图模型
+- **批量重新生成**（「跳过已生成」开关 + 独立的「重新生成」按钮）
+- 关于页（README 随 APK 打包）；关于入口移入设置
+- 图标页整页改为单个 LazyColumn（修复面板展开后列表滚不动）
+- 测试 10 → **151 个用例**；应用分类抽成纯逻辑 `AppClassifier`
+- 清理 23 个冗余文件；根目录 33 → 10 个文件
+
+### 1.1.0（2026-10-11）
+
+- 本地风格从「一种解析式色彩迁移」改成**四类风格**
+- 自定义风格改为在设备上**训练颜色查找表小模型**（解析法热启动，300 次迭代收敛）
+- 端侧模型按需下载（4 个实测可下的魔搭模型）
+- 修复透明像素污染统计量导致图标被压成纯色
+- 图标页性能修复（11003 ms → 115 ms），列表放开到全部应用
+
+### 1.0.0
+
+- 首个版本：应用枚举、真实体积测量、统计与图表、应用分类、批量图标生成
 
 ---
 
 ## 许可
 
 MIT
+

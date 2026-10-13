@@ -17,8 +17,12 @@ android {
         //   修订号 +1  修 bug
         // 1.0.0 -> 1.1.0：本地风格从「一种解析式色彩迁移」改成「四类风格」，
         //                 其中自定义风格改为在设备上训练一个颜色查找表小模型。
-        versionCode 110
-        versionName "1.1.0"
+        // 1.1.0 -> 1.2.0：图标包 APK 可在手机内直接生成；统计页与图表重设计；
+        //                 全局紧凑模式；配色与深色模式重做；响应式布局；
+        //                 三级管线（抠图 -> 主体风格化 -> 合成）；
+        //                 DeepSeek 生成拟物化描述；关于页；批量重新生成。
+        versionCode 120
+        versionName "1.2.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

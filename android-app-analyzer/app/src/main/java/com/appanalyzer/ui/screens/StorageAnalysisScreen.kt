@@ -56,7 +56,7 @@ fun StorageAnalysisScreen(
                     Icon(
                         if (hasStoragePermission) Icons.Default.CheckCircle else Icons.Default.Info,
                         contentDescription = null,
-                        tint = if (hasStoragePermission) Color(0xFF4CAF50) else Color(0xFFFF9800)
+                        tint = if (hasStoragePermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
@@ -81,7 +81,7 @@ fun StorageAnalysisScreen(
             ) {
                 Column(modifier = Modifier.padding(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(AppIcons.Lightbulb, contentDescription = null, tint = Color(0xFFFFC107))
+                        Icon(AppIcons.Lightbulb, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("存储优化建议", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
@@ -97,7 +97,7 @@ fun StorageAnalysisScreen(
                             } else {
                                 val totalCacheGB = statistics.totalCache / (1024.0 * 1024 * 1024)
                                 if (totalCacheGB > 0.5) {
-                                    add("💾 缓存共 ${String.format(Locale.US, "%.1f", totalCacheGB)} GB，可在各应用的系统设置页清理")
+                                    add("缓存共 ${String.format(Locale.US, "%.1f", totalCacheGB)} GB，可在各应用的系统设置页清理")
                                 }
                             }
                             // 去掉了一条「系统应用较多(N个)，可考虑禁用不常用的系统应用」的建议。
@@ -105,7 +105,7 @@ fun StorageAnalysisScreen(
                             // 这种一句话指导既无操作性又有风险。
                             val largeApps = apps.filter { it.appSize > 500 * 1024 * 1024 }
                             if (largeApps.isNotEmpty()) {
-                                add("📦 发现${largeApps.size}个体积超过 500MB 的应用：")
+                                add("发现${largeApps.size}个体积超过 500MB 的应用：")
                                 largeApps.take(3).forEach { add("   • ${it.appName} — ${formatFileSize(it.appSize)}") }
                             }
                         }
@@ -134,18 +134,18 @@ fun StorageAnalysisScreen(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF2196F3).copy(alpha = 0.1f)).padding(12.dp)) {
-                                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF2196F3), modifier = Modifier.size(32.dp))
-                                Text("${stats.userApps}个", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2196F3))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)).padding(12.dp)) {
+                                Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                                Text("${stats.userApps}个", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                 Text("用户应用", fontSize = 12.sp, color = Color.Gray)
                                 Text("$userPercentage%", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFFF44336).copy(alpha = 0.1f)).padding(12.dp)) {
-                                Icon(AppIcons.Android, contentDescription = null, tint = Color(0xFFF44336), modifier = Modifier.size(32.dp))
-                                Text("${stats.systemApps}个", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF44336))
+                                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)).padding(12.dp)) {
+                                Icon(AppIcons.Android, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(32.dp))
+                                Text("${stats.systemApps}个", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
                                 Text("系统应用", fontSize = 12.sp, color = Color.Gray)
                                 Text("$systemPercentage%", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             }
@@ -154,9 +154,9 @@ fun StorageAnalysisScreen(
                         if (stats.totalApps > 0) {
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Box(modifier = Modifier.weight(userPercentage.toFloat().coerceAtLeast(1f)).height(12.dp)
-                                    .clip(RoundedCornerShape(6.dp)).background(Color(0xFF2196F3)))
+                                    .clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.primary))
                                 Box(modifier = Modifier.weight(systemPercentage.toFloat().coerceAtLeast(1f)).height(12.dp)
-                                    .clip(RoundedCornerShape(6.dp)).background(Color(0xFFF44336)))
+                                    .clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.secondary))
                             }
                         }
                     }
@@ -182,18 +182,18 @@ fun StorageAnalysisScreen(
                         if (total <= 0L) {
                             Text("暂无可统计的数据", color = Color.Gray, fontSize = 14.sp)
                         } else {
-                            StorageBar("📦 应用本体", appBodyBytes, total, Color(0xFF2196F3))
+                            StorageBar("应用本体", appBodyBytes, total, MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.height(8.dp))
                             // 无权限时缓存/数据读不到，画出来会是两条 0% 的空条，
                             // 与其让人误以为「缓存为 0」，不如明确说明。
                             if (stats.hasSizeDetail) {
-                                StorageBar("💾 缓存", stats.totalCache, total, Color(0xFFFF9800))
+                                StorageBar("缓存", stats.totalCache, total, MaterialTheme.colorScheme.primary.copy(alpha = 0.60f))
                                 Spacer(modifier = Modifier.height(8.dp))
-                                StorageBar("📁 数据（不含缓存）", stats.totalData, total, Color(0xFF4CAF50))
+                                StorageBar("数据（不含缓存）", stats.totalData, total, MaterialTheme.colorScheme.primary.copy(alpha = 0.32f))
                             } else {
                                 Text(
-                                    "💾 缓存 / 📁 数据：未授权，无法读取（不计入上方比例）",
-                                    fontSize = 12.sp, color = Color(0xFFFF9800)
+                                    "缓存 / 数据：未授权，无法读取（不计入上方比例）",
+                                    fontSize = 12.sp, color = MaterialTheme.colorScheme.error
                                 )
                             }
                             Spacer(modifier = Modifier.height(12.dp))
