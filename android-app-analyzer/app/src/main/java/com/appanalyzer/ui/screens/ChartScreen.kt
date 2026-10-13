@@ -314,6 +314,16 @@ private fun BarDetailStrip(app: AppInfo?, unit: SizeUnit) {
             .animateContentSize()
             .padding(horizontal = 12.dp, vertical = 9.dp)
     ) {
+        // ⚠️ 这里原来是「if (app == null) { Text(...); return@Column }」。
+        //
+        // 在 @Composable lambda 里提前 return 是 Compose 的已知陷阱：编译器无法
+        // 为两条路径生成一致的 group 结构，槽表（slot table）会失衡。实测表现是
+        // 一进图表页就崩：
+        //   IndexOutOfBoundsException: Index -1 out of bounds for length 0
+        //     at androidx.compose.runtime.ComposerImpl.exitGroup
+        //     at androidx.compose.runtime.ComposerImpl.endRoot
+        //
+        // 必须写成 if/else —— 两条分支各自完整，group 数量一致。
         if (app == null) {
             Text(
                 text = "点击任意条目查看尺寸明细",
@@ -323,8 +333,7 @@ private fun BarDetailStrip(app: AppInfo?, unit: SizeUnit) {
                 softWrap = false,
                 overflow = TextOverflow.Ellipsis
             )
-            return@Column
-        }
+        } else {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = app.appName,
@@ -370,6 +379,7 @@ private fun BarDetailStrip(app: AppInfo?, unit: SizeUnit) {
                 modifier = Modifier.weight(1f)
             )
         }
+        }   // 关闭 else
     }
 }
 

@@ -273,7 +273,55 @@ Gemini 和 OpenAI 支持双图输入（原图标 + 风格参考图），万相�
 - 独立的「**重新生成**」按钮，不管有没有生成过都重跑一遍
 - 提示语说清楚了该怎么做
 
-### 3.8 图标页的滚动（重要修复）
+### 3.8 一个把整个图表页搞崩的 Compose 陷阱（重要）
+
+**现象**：切到「图表」tab，应用**必崩**。
+
+```
+FATAL EXCEPTION: main
+java.lang.IndexOutOfBoundsException: Index -1 out of bounds for length 0
+    at androidx.compose.runtime.ComposerImpl.exitGroup
+    at androidx.compose.runtime.ComposerImpl.endRoot
+```
+
+堆栈里**一行业务代码都没有**，全是 Compose 运行时，看着像框架的锅。
+
+**定位过程**（真机逐个 tab 点，每次崩溃后重启）：
+
+| 实验 | 结果 |
+|---|---|
+| 六个 tab 各点一次 | 只有「图表」崩，其余五个都正常 |
+| 把 ChartScreen 函数体换成一行 Text | 正常 |
+| 只渲染控制卡片 | 崩 |
+| 只渲染主卡片（控制卡片换成一行字） | 崩 |
+| 临时摘掉 AdaptiveScaffold | 还崩（排除了我自己的代码） |
+
+**根因**：`BarDetailStrip` 里写了
+
+```kotlin
+Column(...) {
+    if (app == null) {
+        Text("点击任意条目查看尺寸明细")
+        return@Column          // <- 元凶
+    }
+    Row { ... }
+}
+```
+
+**在 @Composable lambda 里提前 return**，编译器无法为两条分支生成一致的 group 结构，
+Compose 的槽表（slot table）失衡 —— 一进页面就崩。
+
+**修法**：改成 if/else，两条分支各自完整。
+
+**顺带全项目排查**：同样的写法在别处还有 **5 处**（AboutScreen 的 `return@Scaffold`、
+IconReplaceScreen 四个面板的 `if (!expanded) return@Column`）。全部改成了 if/else。
+（`Canvas` 里的 `return@Canvas` 是 DrawScope lambda，不是 composable，安全。）
+
+**教训：@Composable lambda 里不要用提前 return，一律用 if/else。**
+
+**验证**：六个 tab、图标页每个面板、每种引擎、设置页、关于页，逐个点过，**零崩溃**。
+
+### 3.9 图标页的滚动（重要修复）
 
 **曾经的 bug**：整页是最外层 `Column`（不可滚动）+ 固定高度子项，
 配置面板一展开就吃掉 400~600dp，下面那个 `fillMaxSize` 的 LazyColumn 高度被挤到接近 0 ——

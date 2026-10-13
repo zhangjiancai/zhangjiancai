@@ -815,7 +815,7 @@ private fun LocalModelPanel(
                 Icon(if (expanded) AppIcons.ExpandLess else AppIcons.ExpandMore, null, tint = Color.Gray)
             }
 
-            if (!expanded) return@Column
+            if (expanded) {
 
             Spacer(Modifier.height(4.dp))
             Text(
@@ -907,6 +907,7 @@ private fun LocalModelPanel(
                     TextButton(onClick = onOpenStyleLibrary) { Text("选择", fontSize = 11.sp) }
                 }
             }
+            }
         }
     }
 }
@@ -942,7 +943,7 @@ private fun ComposePanel(
             Spacer(Modifier.weight(1f))
             Icon(if (sub) AppIcons.ExpandLess else AppIcons.ExpandMore, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
         }
-        if (!sub) return@Column
+        if (sub) {
 
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1018,6 +1019,7 @@ private fun ComposePanel(
                     fontSize = 9.sp, color = Color.Gray
                 )
             }
+        }
         }
     }
 }
@@ -1117,7 +1119,7 @@ private fun LocalStylePanel(
             }
             Text(style.description, fontSize = 10.sp, color = Color.Gray)
 
-            if (!expanded) return@Column
+            if (expanded) {
 
             // ---- 自定义风格：需要一张参考图 + 在本机训练一个小模型 ----
             if (style == LocalStyle.CUSTOM) {
@@ -1207,6 +1209,7 @@ private fun LocalStylePanel(
                 Spacer(Modifier.width(8.dp))
                 Text("${(strength * 100).toInt()}%", fontSize = 11.sp, color = Color.Gray)
             }
+            }
         }
     }
 }
@@ -1253,7 +1256,7 @@ private fun AiPromptPanel(
                 }
                 Icon(if (expanded) AppIcons.ExpandLess else AppIcons.ExpandMore, null, tint = Color.Gray)
             }
-            if (!expanded) return@Column
+            if (expanded) {
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = promptText,
@@ -1327,6 +1330,7 @@ private fun AiPromptPanel(
                 if (providerSupportsStyleRef) {
                     TextButton(onClick = onOpenLibrary) { Text("选择", fontSize = 12.sp) }
                 }
+            }
             }
         }
     }

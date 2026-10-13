@@ -61,13 +61,14 @@ fun AboutScreen(onBack: () -> Unit) {
         }
     ) { padding ->
         val content = lines
+        // ⚠️ 不能写「if (null) { ...; return@Scaffold }」——
+        // 在 @Composable lambda 里提前 return 会让 Compose 的槽表失衡。
+        // 项目里已经在图表页实测崩过一次（IndexOutOfBoundsException at endRoot）。
         if (content == null) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-            return@Scaffold
-        }
-
+        } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
@@ -84,6 +85,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 Spacer(Modifier.height(16.dp))
             }
         }
+        }   // 关闭 else
     }
 }
 
