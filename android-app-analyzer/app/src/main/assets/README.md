@@ -265,6 +265,19 @@ Gemini 和 OpenAI 支持双图输入（原图标 + 风格参考图），万相�
 | 设备安装 | Android 16 模拟器 `adb install` → Success |
 
 应用内有**可展开的教程**（图标包是什么 / 怎么用 / 支持哪些启动器 / 签名与更新 / 体积耗时）。
+#### 端到端实测（在手机里现生成，不是纸上推演）
+
+在模拟器上装好应用 → 生成一个图标 → 点「打包成 APK」→ 从设备拉出产物 → 用主机工具链验证：
+
+| 检查 | 结果 |
+|---|---|
+| 产物 | @@AppAnalyzerIconPack_20261015_004405.apk@@，20.6 KB |
+| 包名 / sdk | @@com.appanalyzer.iconpack@@，minSdk 26 / targetSdk 34 |
+| @@hasCode=false@@ | ✅ 编码正确（属性 id 0x0101000c） |
+| 启动器 action | **6 个全在**（adw / GO / Nova / Lawnchair / anddoes / teslacoilsw） |
+| 签名 | **v2 通过**，签名者 @@CN=AppAnalyzer IconPack@@（手机端现场生成的自签名证书） |
+| dex 文件 | **0 个** —— 确认是纯资源包 |
+| 图标内容 | @@ic_com_google_android_googlequicksearchbox.png@@ 确实打进去了 |
 
 ### 3.7 重新生成
 
