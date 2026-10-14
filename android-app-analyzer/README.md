@@ -3,6 +3,8 @@
 > **版本 1.2.0**（versionCode 120）· 最后更新 2026-10-14
 >
 > 仓库：<https://github.com/zhangjiancai/zhangjiancai> → `android-app-analyzer/` 目录
+>
+> 📦 **要上架应用市场？看 [PUBLISHING.md](PUBLISHING.md)** —— 签名、权限、软著、备案、各市场流程都在里面。
 
 一句话说清它做什么：**枚举手机里所有已安装应用，读出它们真实的体积，并且能给它们批量生成新图标、导出成启动器能用的图标包。**
 

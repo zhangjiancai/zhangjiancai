@@ -23,3 +23,11 @@ Thumbs.db
 /iconpack/src/main/generated/assets/*
 /iconpack/src/main/generated/res/drawable-xxhdpi/*
 !/iconpack/src/main/generated/res/drawable-xxhdpi/ic_placeholder.png
+
+# ---- 发布签名（绝不能进版本库）----
+# release.keystore 是应用的签名身份，泄露 = 别人能冒名发布你的更新
+# keystore.properties 里是它的密码
+release.keystore
+keystore.properties
+*.jks
+*.keystore

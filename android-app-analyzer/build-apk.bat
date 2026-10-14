@@ -21,7 +21,10 @@ echo.
 echo ----------------------------------------------------------
 echo  Building... (first run takes longer, later runs use cache)
 echo ----------------------------------------------------------
-call gradlew.bat assembleDebug :iconpack:assembleDebug --console=plain
+REM Debug + Release + IconPack 一起构建。
+REM Release 包用 release.keystore 正式签名，是**上架应用市场要用**的那个；
+REM 没配密钥时 Gradle 会跳过签名（build.gradle 里有判断），不会报错。
+call gradlew.bat assembleDebug assembleRelease :iconpack:assembleDebug --console=plain
 if errorlevel 1 goto fail_build
 
 echo.
@@ -29,15 +32,18 @@ echo ==========================================================
 echo   BUILD SUCCESSFUL
 echo ==========================================================
 echo.
-echo   App APK      : %~dp0app\build\outputs\apk\debug\app-debug.apk
-echo   IconPack APK : %~dp0iconpack\build\outputs\apk\debug\iconpack-debug.apk
+echo   App APK (debug)   : %~dp0app\build\outputs\apk\debug\app-debug.apk
+echo   App APK (release) : %~dp0app\build\outputs\apk\release\app-release.apk
+echo   IconPack APK      : %~dp0iconpack\build\outputs\apk\debug\iconpack-debug.apk
+echo.
+echo Upload app-release.apk to the app stores. See PUBLISHING.md.
 echo.
 echo Install to a phone (USB debugging enabled):
 echo   "%ANDROID_HOME%\platform-tools\adb.exe" install -r "%~dp0app\build\outputs\apk\debug\app-debug.apk"
 echo.
-echo NOTE: the IconPack APK is a placeholder until you export icons from the
-echo       app and unzip them into iconpack\src\main\generated\ , then rerun
-echo       this script.
+echo NOTE: use the DEBUG apk for local testing and the RELEASE apk for the
+echo       stores. They are signed with different keys, so you must uninstall
+echo       one before installing the other.
 echo.
 pause
 exit /b 0

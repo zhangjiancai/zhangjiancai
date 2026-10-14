@@ -45,10 +45,45 @@ android {
         // 用户在应用内「设置」页填写，只保存在本机 SharedPreferences 中。
     }
 
+    // ==================== 发布签名 ====================
+    //
+    // 上架必须用正式签名：应用市场一律拒收 debug 签名（它用的是 Android 默认调试密钥，
+    // 谁都能拿到，等于没有签名保护）。
+    //
+    // 密钥与密码放在项目根目录的 release.keystore / keystore.properties 里，
+    // **两个文件都在 .gitignore 中，绝不进版本库**。
+    //
+    // ⚠️ 务必备份 release.keystore：丢了就永远无法给已上架的应用发更新
+    //    （只能换包名重新上架，老用户收不到更新）。
+    def keystorePropsFile = rootProject.file('keystore.properties')
+    def keystoreProps = new Properties()
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.withInputStream { keystoreProps.load(it) }
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+            // v1 关掉：只有 Android 7.0 以下才需要，本项目 minSdk 26，用不上。
+            // v2/v3 打开：v2 是 Android 7.0+ 的要求，v3 让密钥可以轮换。
+            enableV1Signing false
+            enableV2Signing true
+            enableV3Signing true
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig keystorePropsFile.exists() ? signingConfigs.release : null
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 不混淆：apksig 与 onnxruntime 都大量依赖反射，开 R8 需要一整套 keep 规则
+            // 并逐个验证，风险大于收益（26 MB 的体积对国内应用市场完全不是问题）。
         }
     }
 

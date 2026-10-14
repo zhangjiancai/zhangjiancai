@@ -10,30 +10,40 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- 存储权限 - Android 13+ 需要这些 -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29"
-        tools:ignore="ScopedStorage" />
+    <!--
+      存储 / 媒体权限：**一个都不需要**，全部移除。
 
-    <!-- Android 13+ 使用新的媒体权限 -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+      「从相册导入风格参考图」走的是 ActivityResultContracts.GetContent()，
+      也就是系统的文档选择器（SAF）。SAF 是由系统进程替用户挑文件、只把结果
+      URI 回传给应用，应用**全程不需要任何存储或媒体权限**。
+
+      而原来这里申请了 READ_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE /
+      READ_MEDIA_IMAGES / READ_MEDIA_VIDEO / READ_MEDIA_AUDIO 五个权限却一个都没用到 ——
+      上架审核里这叫「过度索权」，是必被驳回的红旗项（华为、小米、OPPO 等
+      都会要求逐条说明权限用途，用不到的必须删）。
+
+      导出图标包走 MediaStore Downloads，同样不需要权限。
+    -->
 
     <!-- 网络权限 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!--
+      allowBackup=false：应用里存着用户填的 DeepSeek API Key（SharedPreferences）。
+      开 true 的话它会被系统备份（adb backup / 云备份）带走，密钥就泄露到本机之外了。
+
+      usesCleartextTraffic 已移除：项目里所有网络请求都是 https
+      （DeepSeek / 魔搭 / 各生图服务商），一个 http:// 请求都没有。
+      保留「允许明文流量」会被安全审核当成扣分项。
+    -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppAnalyzer"
-        android:usesCleartextTraffic="true"
         tools:targetApi="34">
 
         <activity
