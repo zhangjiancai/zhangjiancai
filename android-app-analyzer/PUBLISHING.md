@@ -397,3 +397,135 @@ API Key 只存在你手机里，不会上传到任何服务器。
 - [ ] 生成截图（可以在模拟器上跑起来截）
 
 说一声就行。
+
+---
+
+## 十、怎么打包 APK（三种方式，任选）
+
+### 方式 A：Android Studio 图形界面（最直观，推荐给你）
+
+> **重要**：签名已经在 `build.gradle` 里配好了，所以**不要**用
+> `Build → Generate Signed Bundle / APK` —— 那个会让你手动选密钥库、手填密码，
+> 反而容易填错。直接用下面的 `Build APK(s)` 就会自动用 release.keystore 签名。
+
+**步骤**：
+
+```
+① 打开项目
+   双击项目根目录的 open-studio.bat
+   （或 Studio 里 File → Open → 选 D:\zjc20\Documents\android-app-analyzer）
+
+② 等 Gradle Sync 完成
+   首次要下载依赖，几分钟；右下角进度条走完再进行下一步
+
+③ 切换构建变体到 release
+   左侧边栏找 Build Variants 面板（没有就 View → Tool Windows → Build Variants）
+   把 :app 那一行的 Active Build Variant 从 debug 改成 release
+   把 :iconpack 也改成 release（可选）
+
+④ 打包
+   菜单 Build → Build Bundle(s) / APK(s) → Build APK(s)
+
+⑤ 产物
+   app/build/outputs/apk/release/app-release.apk
+   右下角会弹一个通知，点「locate」直接定位到文件
+```
+
+**在手机上跑起来**（可选）：
+
+手机开 USB 调试插上电脑 → Studio 顶部设备下拉里选中它 → 点绿色三角 ▶ Run。
+注意：release 变体点 Run 会在手机上装**正式签名版**，和之前装的 debug 版签名不同，
+要先卸载旧的。
+
+### 方式 B：一键脚本（双击就行，不用开 Studio）
+
+双击项目根目录的 **build-apk.bat**。
+
+它会自动找到 JDK 和 SDK，同时构建 debug + release 两个包，然后打印产物路径。
+
+> 这个脚本存在的意义：这台机器上 `JAVA_HOME` 没设、PATH 里也没有 `java`，
+> 直接双击 `gradlew.bat` 会报 `ERROR: JAVA_HOME is not set`。
+> 脚本会自己去 Android Studio 的 JBR 目录里找。
+
+**更省事的做法**：右键 build-apk.bat → 发送到 → 桌面快捷方式，以后双击快捷方式就行。
+
+### 方式 C：命令行（想自己控制时）
+
+```powershell
+cd D:\zjc20\Documents\android-app-analyzer
+$env:JAVA_HOME = 'D:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+
+.\gradlew.bat assembleRelease      # 只出 release（上架用这个）
+.\gradlew.bat assembleDebug        # 只出 debug（自己测试用）
+.\gradlew.bat :app:testDebugUnitTest   # 跑 151 个单元测试
+```
+
+---
+
+## 十一、debug 包和 release 包的区别（别搞混）
+
+| | debug | release |
+|---|---|---|
+| 用途 | 自己测试 | **上架应用市场** |
+| 签名 | Android 默认调试密钥（公开可查） | 你自己的 release.keystore |
+| 体积 | 26.49 MB | **23.23 MB** |
+| 市场接受 | ❌ 一律拒收 | ✅ |
+| 体积为什么大 | 带调试工具（Compose Preview 等） | 去掉了 |
+
+> ⚠️ 两者签名不同，**不能互相覆盖安装**。手机上装了一个，装另一个要先卸载。
+
+---
+
+## 十二、打包常见问题
+
+### Q: Studio 里 Build 菜单是灰的 / 找不到 Build Variants
+
+Gradle Sync 还没完成。看右下角进度条，或者 File → Sync Project with Gradle Files 手动同步。
+
+### Q: Sync 报错找不到 SDK
+
+检查项目根目录的 `local.properties`，应该有 `sdk.dir` 指向你的 SDK：
+
+```properties
+sdk.dir=C\:\\Users\\zjc20\\AppData\\Local\\Android\\Sdk
+```
+
+这个文件**不进版本库**（在 .gitignore 里），换电脑要自己建。
+
+### Q: 提示 JAVA_HOME is not set
+
+用 build-apk.bat 就不会有这个问题。如果坚持用命令行，先设：
+
+```powershell
+$env:JAVA_HOME = 'D:\Program Files\Android\Android Studio\jbr'
+```
+
+### Q: 我想换个新的签名密钥
+
+重新生成 keystore 并更新 keystore.properties 即可：
+
+```powershell
+cd D:\zjc20\Documents\android-app-analyzer
+$env:JAVA_HOME = 'D:\Program Files\Android\Android Studio\jbr'
+& "$env:JAVA_HOME\bin\keytool.exe" -genkeypair -v `
+  -keystore release.keystore -alias appanalyzer `
+  -keyalg RSA -keysize 2048 -validity 10000 `
+  -storepass 你的纯字母数字密码 -keypass 你的纯字母数字密码 `
+  -dname "CN=你的名字,O=你的组织,C=CN"
+```
+
+> 密码**只能用字母数字**：Java 的 Properties 会把反斜杠 / 冒号 / 等号 / 空格当转义符，
+> 带这些字符的密码读出来会不一样（这个坑我踩过）。
+
+> ⚠️ 换密钥意味着已上架的应用**无法再更新**（Android 校验签名一致性），
+> 除非用 Google Play 的应用签名或各市场的密钥托管。**上架前就把密钥定下来。**
+
+### Q: 打包出来是 arm64 的，能在 32 位手机上装吗
+
+不能。当前只打了 `arm64-v8a`（2018 年后的手机基本都是）。
+
+要加 32 位支持，在 app/build.gradle 里把 `abiFilters` 加上 `'armeabi-v7a'`，
+代价是 APK 会大 **10.4 MB**（ONNX Runtime 的 32 位 .so）。
+
+现在国内主流市场都接受纯 64 位应用，**不建议加**。
