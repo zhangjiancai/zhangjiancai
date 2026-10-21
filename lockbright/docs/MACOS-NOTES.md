@@ -1,6 +1,6 @@
 # LockBright — macOS 适配说明（技术调研 + 实现说明 + 未实测清单）
 
-> 本文件由 macOS 维护者（macOS 维护者）编写。
+> 本文件由 LockBright 维护者编写（macOS 侧代码尚未在真机上运行）。
 > **写作环境：只有 Windows 机器，macOS 代码一行都没有在真机上跑过。** 所有 macOS 侧结论来自：
 > ① Apple 官方文档 / man page / SDK 源码（有链接）；② 上游开源实现源码（nriley/brightness、OpenCV）；
 > ③ 社区实测记录（GitHub issue/PR、StackOverflow，有链接）。每条关键结论都标了来源或“未实测”。
