@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local runtime artifacts
+probe/
+*.log
+state.json
+config.json
+.venv/
+venv/

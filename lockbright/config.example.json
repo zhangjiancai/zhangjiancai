@@ -1,0 +1,23 @@
+{
+  "check_interval_seconds": 60,
+  "night_start": "20:00",
+  "morning_time": "07:30",
+  "morning_brightness": 100,
+  "dim_brightness": 0,
+  "fallback_restore_brightness": 80,
+  "dark_luma_threshold": 20.0,
+  "restore_luma_threshold": 40.0,
+  "dark_confirm_samples": 2,
+  "restore_on_unlock": true,
+  "treat_remote_as_locked": true,
+  "camera_index": 0,
+  "camera_name": null,
+  "camera_samples": 5,
+  "camera_warmup_frames": 3,
+  "camera_backend": "auto",
+  "camera_manual_exposure": true,
+  "camera_exposure": -4.0,
+  "log_level": "INFO",
+  "log_max_bytes": 1048576,
+  "log_backup_count": 3
+}

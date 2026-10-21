@@ -1,0 +1,2 @@
+# LockBright 运行依赖（Python 3.9+）
+opencv-python>=4.8
