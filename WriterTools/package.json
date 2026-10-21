@@ -1,0 +1,35 @@
+{
+  "name": "writertools",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "WriterTools — 极简跨平台打字机写作工具：逐字符实时记录、可恢复版本历史",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "node tests/e2e/run.mjs",
+    "check:log": "node tools/wtlog-check.mjs",
+    "check:zip": "node tools/wtzip-check.mjs",
+    "export:training": "node tools/wtlog-to-training.mjs",
+    "smoke:ui": "node tools/browser-check.mjs"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "fake-indexeddb": "^6.0.0",
+    "playwright": "^1.49.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^3.0.5"
+  }
+}

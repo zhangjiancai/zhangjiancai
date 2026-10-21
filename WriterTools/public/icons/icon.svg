@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="WriterTools">
+  <!-- Neutral-only artwork: pure black background, pure white geometric "W". -->
+  <rect width="512" height="512" fill="#000000"/>
+  <path d="M 96 160 L 176 352 L 256 214 L 336 352 L 416 160"
+        fill="none" stroke="#FFFFFF" stroke-width="44"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+.DS_Store
+Thumbs.db
+playwright-report/
+test-results/
+coverage/
+.wt-backup/
+.tmp/
+.lead-tmp/
+*.log
