@@ -189,6 +189,12 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ('OpenCV      : ' + (($cvOut | Select-Object -Last 1) -replace "`r", ''))
 
 # ------------------------------------------------------------ stop old version
+$watchdogTaskName = $TaskName + 'Watchdog'
+$existingWatchdog = Get-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue
+if ($existingWatchdog) {
+  try { Stop-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue } catch { }
+  Write-Host ('Stopped existing watchdog task: ' + $watchdogTaskName)
+}
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask) {
   try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } catch { }
@@ -213,6 +219,7 @@ if (Test-Path $AppDir) {
 }
 New-Item -ItemType Directory -Path $AppDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $srcRoot 'run.py') -Destination $AppDir -Force
+Copy-Item -LiteralPath (Join-Path $srcRoot 'watchdog.py') -Destination $AppDir -Force
 Copy-Item -LiteralPath (Join-Path $srcRoot 'lb') -Destination $AppDir -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $srcRoot 'config.example.json') -Destination $AppDir -Force
 Copy-Item -LiteralPath (Join-Path $srcRoot 'requirements.txt') -Destination $AppDir -Force
@@ -232,6 +239,8 @@ $settings = New-ScheduledTaskSettingsSet `
   -DontStopIfGoingOnBatteries `
   -ExecutionTimeLimit ([TimeSpan]::Zero) `
   -MultipleInstances IgnoreNew `
+  -RestartCount 3 `
+  -RestartInterval (New-TimeSpan -Minutes 1) `
   -StartWhenAvailable
 $principal = New-ScheduledTaskPrincipal -UserId $currentUserSid -LogonType Interactive -RunLevel Limited
 try {
@@ -243,6 +252,29 @@ try {
 }
 $task = Get-ScheduledTask -TaskName $TaskName
 Write-Host ('Registered scheduled task: ' + $TaskName + ' (state=' + $task.State + ', user=' + $currentUser + ')')
+
+# New-ScheduledTaskSettingsSet cannot express MultipleInstancesPolicy
+# "StopExisting" (its enum only has IgnoreNew/Parallel/Queue), but we need it:
+# when the user logs in again after an RDP session, an instance left in the old
+# disconnected session would otherwise block the new one (IgnoreNew) and the
+# tool would look like it never auto-started.  Patch the task XML instead.
+$taskXml = Export-ScheduledTask -TaskName $TaskName
+if ($taskXml -notmatch '<MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>') {
+  $patchedXml = $taskXml -replace '<MultipleInstancesPolicy>[^<]+</MultipleInstancesPolicy>', '<MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>'
+  if ($patchedXml -eq $taskXml) {
+    Fail 'cannot patch MultipleInstancesPolicy to StopExisting in task XML'
+  }
+  try {
+    Register-ScheduledTask -TaskName $TaskName -Xml $patchedXml -Force | Out-Null
+  } catch {
+    Fail ('registering the StopExisting task XML failed: ' + $_.Exception.Message)
+  }
+  $taskXml = Export-ScheduledTask -TaskName $TaskName
+}
+$multiInstances = ''
+if ($taskXml -match '<MultipleInstancesPolicy>([^<]+)</MultipleInstancesPolicy>') {
+  $multiInstances = $Matches[1]
+}
 
 # Verify the settings that are easy to get wrong (the classic pitfall is the
 # default 3-day execution time limit silently stopping the daemon, and an
@@ -257,15 +289,41 @@ if ($firstTrigger) {
   $triggerUser = [string]$firstTrigger.UserId
 }
 $logonType = [string]$task.Principal.LogonType
+$restartCount = [int]$taskSettings.RestartCount
+$restartInterval = [string]$taskSettings.RestartInterval
 Write-Host ('  ExecutionTimeLimit: ' + $limitText + ' (PT0S = unlimited, no auto-stop)')
 Write-Host ('  Trigger           : ' + $triggerType + ' user=' + $triggerUser)
 Write-Host ('  Principal         : logonType=' + $logonType + ' runLevel=' + [string]$task.Principal.RunLevel)
+Write-Host ('  MultipleInstances : ' + $multiInstances + ' (StopExisting = kill stale session instance on logon)')
+Write-Host ('  RestartOnFailure  : count=' + $restartCount + ' interval=' + $restartInterval)
 if ($limitText -ne 'PT0S') {
   Fail ('unexpected ExecutionTimeLimit ' + $limitText + ' - the task would stop itself; expected PT0S')
 }
 if ($triggerType -notmatch 'LogonTrigger') {
   Fail ('unexpected trigger type "' + $triggerType + '" - expected an AtLogOn trigger')
 }
+if ($multiInstances -ne 'StopExisting') {
+  Fail ('unexpected MultipleInstances (' + $multiInstances + ') - a stale daemon from a disconnected RDP session would block the new logon instance')
+}
+
+# --------------------------------------------------------------- watchdog task
+# Task Scheduler "restart on failure" does not reliably cover externally killed
+# processes, so a tiny hidden watchdog (pythonw, no console window) checks every
+# 2 minutes and starts LockBright again if the daemon is gone.
+$watchdogPy = Join-Path $AppDir 'watchdog.py'
+if (-not (Test-Path $watchdogPy)) {
+  Fail ('watchdog.py missing after copy: ' + $watchdogPy)
+}
+$watchdogCommand = '"' + $pythonw + '" "' + $watchdogPy + '"'
+$null = schtasks.exe /Create /TN $watchdogTaskName /TR $watchdogCommand /SC MINUTE /MO 2 /IT /RL LIMITED /F 2>&1
+if ($LASTEXITCODE -ne 0) {
+  Fail ('schtasks /Create for the watchdog failed (exit ' + $LASTEXITCODE + ')')
+}
+$watchdogTask = Get-ScheduledTask -TaskName $watchdogTaskName
+if (-not $watchdogTask) {
+  Fail ('watchdog task not found after creation: ' + $watchdogTaskName)
+}
+Write-Host ('Registered watchdog task: ' + $watchdogTaskName + ' (state=' + $watchdogTask.State + ', every 2 min, hidden pythonw)')
 if ($logonType -and $logonType -ne 'Interactive') {
   Write-Host ('WARNING: principal logonType is ' + $logonType + ' (expected Interactive for camera access).') -ForegroundColor Yellow
 }
@@ -346,8 +404,9 @@ if (-not $logOk) {
 
 Write-Host ''
 Write-Host 'LockBright installed and running.' -ForegroundColor Green
-Write-Host ('  Task name    : ' + $TaskName + ' (state=' + $task.State + ')')
+Write-Host ('  Task name    : ' + $TaskName + ' (state=' + $task.State + ', policy=' + $multiInstances + ')')
 Write-Host ('  Task settings: ExecutionTimeLimit=' + $limitText + ' trigger=' + $triggerType + ' logonType=' + $logonType)
+Write-Host ('  Watchdog     : ' + $watchdogTaskName + ' (state=' + $watchdogTask.State + ', every 2 min)')
 Write-Host ('  Process PID  : ' + $proc.ProcessId)
 Write-Host ('  App directory: ' + $AppDir)
 Write-Host ('  Python       : ' + $python)

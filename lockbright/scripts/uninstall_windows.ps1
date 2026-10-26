@@ -79,6 +79,20 @@ $homeDir = Join-Path $env:USERPROFILE '.lockbright'
 
 $did = @()
 
+# 0) watchdog first: it would otherwise restart LockBright during uninstall
+$watchdogTaskName = $TaskName + 'Watchdog'
+$watchdogPy = Join-Path $AppDir 'watchdog.py'
+$existingWatchdog = Get-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue
+if ($existingWatchdog) {
+  try { Stop-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue } catch { }
+  try {
+    Unregister-ScheduledTask -TaskName $watchdogTaskName -Confirm:$false -ErrorAction Stop
+    $did += ('unregistered watchdog task ' + $watchdogTaskName)
+  } catch {
+    Write-Host ('WARNING: could not unregister watchdog task ' + $watchdogTaskName + ': ' + $_.Exception.Message) -ForegroundColor Yellow
+  }
+}
+
 # 1) stop the scheduled task
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask) {
@@ -99,14 +113,16 @@ if ($existingTask) {
 # 3) kill leftover processes (give the task a moment to exit)
 Start-Sleep -Milliseconds 500
 $killed = 0
-for ($i = 0; $i -lt 5; $i++) {
-  $p = Find-RunPyProcess $runPy
-  if (-not $p) { break }
-  try {
-    Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
-    $killed++
-  } catch { }
-  Start-Sleep -Milliseconds 400
+foreach ($pattern in @($runPy, $watchdogPy)) {
+  for ($i = 0; $i -lt 5; $i++) {
+    $p = Find-RunPyProcess $pattern
+    if (-not $p) { break }
+    try {
+      Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
+      $killed++
+    } catch { }
+    Start-Sleep -Milliseconds 400
+  }
 }
 if ($killed -gt 0) {
   $did += ('stopped ' + $killed + ' running process(es)')

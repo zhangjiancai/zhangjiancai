@@ -360,3 +360,22 @@ python reports\lockscreen_probe.py --repeat 3
      并在“已调暗状态下测光”时打印 INFO 读数，便于排查。
    - 复测：23:18:44 开灯状态 luma=57.3 → 23:18:46 `恢复亮度: 亮度设为 100%
      （开灯了（亮度 57.3 >= 40.0））`，亮度读回 100、state `dimmed=false`。
+9. **自启加固（2026-10-26 晚，用户反馈“不能自启”）**：
+   - 排查结论：任务本身在 22:28:20（本次开机 22:27:31 后登录）**确实被 AtLogOn 触发并启动**
+     （TaskScheduler Operational 日志 id 129/200；日志有 22:28:57 启动行），所以“没自启”的
+     观感更可能来自旧实例残留：`MultipleInstancesPolicy=IgnoreNew` 时，RDP 断开后留在旧会话的
+     守护进程仍算“任务在运行”，新登录会话触发时会被忽略 → 新会话里没有可用的守护进程。
+   - 修复 1：任务 XML 改成 **`MultipleInstancesPolicy=StopExisting`**（PowerShell 的
+     `New-ScheduledTaskSettingsSet` 枚举没有 StopExisting，所以注册后用
+     `Export-ScheduledTask` 改 XML 再 `Register-ScheduledTask -Xml` 回写）。实测：任务运行中
+     再次触发，旧 PID 20124 被杀、新 PID 11208 启动（日志出现新的启动行）。
+   - 修复 2：**看门狗任务 `LockBrightWatchdog`**（`schtasks /Create /SC MINUTE /MO 2 /IT`，
+     `pythonw.exe watchdog.py` 隐藏运行），每 2 分钟检查守护进程是否存在，不存在就
+     `schtasks /Run /TN LockBright`。实测：强杀 PID 16908 后，22:40:01 看门狗触发，
+     22:40:06 守护进程以新 PID 14312 恢复，`watchdog.log` 有对应记录；守护进程正常时看门狗
+     不写日志、不重复启动。
+   - 修复 3：任务保留 `RestartCount=3 / RestartInterval=1min`，但实测“外部 Stop-Process 强杀”
+     不会触发 Task Scheduler 的 restart-on-failure（LastTaskResult=0xFFFFFFFF），所以真正兜底
+     靠看门狗；文档已按这个事实写。
+   - 仍有的系统限制：**开机停在登录界面时不会跑**（需要登录会话才能开摄像头/控制当前桌面亮度）；
+     用户登录后由 AtLogOn 启动，之后看门狗维持。

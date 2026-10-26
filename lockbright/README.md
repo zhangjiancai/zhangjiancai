@@ -95,6 +95,40 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\uninstall_windows.ps
 
 也可以不安装、直接前台运行：`python run.py run`（Ctrl+C 退出）。
 
+### 自启与故障排查（Windows）
+
+安装脚本会注册**两个**计划任务：
+
+- `LockBright`：用户登录后自动启动守护进程（相机/亮度必须在登录会话里，所以**开机停在登录界面时
+  不会跑**，必须有人登录；这是 Windows 系统限制，不是 bug）；
+- `LockBrightWatchdog`：每 2 分钟检查一次，发现守护进程没了就自动把它拉起来（`pythonw` 隐藏运行，
+  不弹窗；只在用户登录后运行）。
+
+`LockBright` 任务设置：
+
+- 触发器：AtLogOn（当前用户）；
+- 执行时不弹窗（`pythonw`），电池供电也运行、不因切换电池停止；
+- **MultipleInstances = StopExisting**：每次登录/切换会话时，先杀掉旧会话里残留的实例再启动新的
+  （以前用 IgnoreNew，RDP 断开后留在旧会话的进程会挡住新登录的实例，表现就是“看着像没自启”）；
+- **RestartOnFailure**：任务失败时 1 分钟内重试，最多 3 次（外部强杀不一定触发，所以还有看门狗兜底）；
+- 无执行时限（PT0S）。
+
+检查是否在跑：
+
+```powershell
+Get-ScheduledTask -TaskName LockBright,LockBrightWatchdog | Select-Object TaskName,State
+Get-ScheduledTaskInfo -TaskName LockBright | Select-Object LastRunTime,LastTaskResult
+Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" |
+  Where-Object { $_.CommandLine -match 'LockBright' } |
+  Select-Object ProcessId,SessionId,CreationDate,CommandLine
+Get-Content "$env:USERPROFILE\.lockbright\lockbright.log" -Tail 20 -Encoding UTF8
+Get-Content "$env:USERPROFILE\.lockbright\watchdog.log" -Tail 5 -Encoding UTF8   # 看门狗重启记录
+```
+
+如果任务不在跑：先重跑一次 `scripts\install_windows.ps1`（会重建两个任务并启动）；
+自启没触发时可看 `事件查看器 → 应用程序和服务日志 → Microsoft → Windows → TaskScheduler → Operational`，
+或直接把任务历史/日志发我。
+
 ### 校准阈值（推荐做一次）
 
 默认 `camera_exposure = -4`（这台摄像头能接受的最长手动曝光；再短会太暗）配合
