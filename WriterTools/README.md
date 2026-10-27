@@ -16,6 +16,9 @@
 - **PWA**：可安装到桌面或安卓主屏幕，缓存应用壳后可离线打开（数据本来就在本地）。
 
 > 状态：v0.2.1，功能可用但仍在完善；文件格式已定稿并由金标准文件守护向下兼容，见 [docs/FILE-FORMAT.md](docs/FILE-FORMAT.md)。使用说明见 [docs/USER-GUIDE.md](docs/USER-GUIDE.md)。
+>
+> **在线使用（电脑版 / PWA）**：<https://zhangjiancai.github.io/WriterTools/>
+> **安卓版下载（APK）**：<https://github.com/zhangjiancai/WriterTools/releases/latest>
 
 ## 界面预览
 
@@ -36,6 +39,21 @@
 **原始输入回放/查看**（编辑器右上角入口）：按时间线查看拼音/预编辑变化、上屏与删除记录，支持播放与单步。
 
 ![原始输入面板](docs/screenshots/input-trace-light.png)
+
+## 在线使用与下载
+
+| 平台 | 获取方式 | 说明 |
+| --- | --- | --- |
+| 电脑版 / PWA（Windows / macOS / Linux / 安卓浏览器） | <https://zhangjiancai.github.io/WriterTools/> | 浏览器打开即用；Chrome/Edge 点地址栏「安装」后可像桌面应用一样启动，首次加载后支持离线 |
+| 安卓版 APK | [GitHub Releases](https://github.com/zhangjiancai/WriterTools/releases/latest) | debug 签名，Android 7.0+；安装后可在 App 内选择手机备份文件夹 |
+
+GitHub Pages 部署构建（子路径 `/WriterTools/`）：
+
+```powershell
+$env:BASE_PATH='/WriterTools/'
+npm run build
+# 将 dist/ 内容推到 gh-pages 分支（含 .nojekyll）
+```
 
 ## 快速开始
 

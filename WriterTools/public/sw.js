@@ -20,8 +20,19 @@ const PRECACHE = `${VERSION}-precache`;
 const RUNTIME = `${VERSION}-runtime`;
 const CACHE_PREFIX = 'writertools-';
 
+/** 本应用部署根路径（支持 GitHub Pages 子路径，如 /WriterTools/）。 */
+const BASE = new URL('./', self.location).pathname;
+
 // 应用壳（生产构建的入口 HTML 与 PWA 元数据）；hashed assets 在 install 时解析补全。
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png'];
+const APP_SHELL = [
+  BASE,
+  `${BASE}index.html`,
+  `${BASE}manifest.webmanifest`,
+  `${BASE}icons/icon.svg`,
+  `${BASE}icons/icon-192.png`,
+  `${BASE}icons/icon-512.png`,
+  `${BASE}icons/icon-maskable-512.png`,
+];
 
 /** 只缓存同源的、非开发期资源。 */
 function isCacheableRequest(request) {
@@ -30,17 +41,19 @@ function isCacheableRequest(request) {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
   if (url.origin !== self.location.origin) return false;
   const p = url.pathname;
-  if (p.startsWith('/src/') || p.startsWith('/@') || p.startsWith('/node_modules/')) return false;
-  if (p === '/sw.js') return false;
+  const relative = p.startsWith(BASE) ? p.slice(BASE.length) : p;
+  if (relative.startsWith('src/') || relative.startsWith('@') || relative.startsWith('node_modules/')) return false;
+  if (relative === 'sw.js') return false;
   return true;
 }
 
-/** 静态资源：带版本号的 /assets/、图标、字体、manifest、根下常见静态后缀。 */
+/** 静态资源：带版本号的 assets/、图标、字体、manifest、根下常见静态后缀。 */
 function isStaticAsset(url) {
   const p = url.pathname;
-  if (p.startsWith('/assets/') || p.startsWith('/icons/')) return true;
-  if (p === '/manifest.webmanifest') return true;
-  return /\.(?:js|mjs|css|woff2?|ttf|otf|png|jpe?g|gif|svg|webp|avif|ico|json|txt|webmanifest)$/i.test(p);
+  const relative = p.startsWith(BASE) ? p.slice(BASE.length) : p;
+  if (relative.startsWith('assets/') || relative.startsWith('icons/')) return true;
+  if (relative === 'manifest.webmanifest') return true;
+  return /\.(?:js|mjs|css|woff2?|ttf|otf|png|jpe?g|gif|svg|webp|avif|ico|json|txt|webmanifest)$/i.test(relative);
 }
 
 /** 缓存单个 URL；失败不阻塞整体安装（例如图标缺失）。 */
@@ -53,7 +66,7 @@ async function addToCache(cache, url) {
   }
 }
 
-/** 从 index.html 中提取生产资源 URL（/assets/*.js|css 等），用于首次安装即离线可用。 */
+/** 从 index.html 中提取生产资源 URL（assets/*.js|css 等），用于首次安装即离线可用。 */
 function extractBuildAssets(html) {
   const urls = new Set();
   const re = /(?:src|href)\s*=\s*["']([^"']+)["']/gi;
@@ -61,7 +74,9 @@ function extractBuildAssets(html) {
   while ((match = re.exec(html)) !== null) {
     const raw = match[1].trim();
     if (!raw.startsWith('/')) continue;
-    if (/^\/(?:assets|icons)\//.test(raw) || raw === '/manifest.webmanifest') urls.add(raw);
+    if (raw.startsWith(`${BASE}assets/`) || raw.startsWith(`${BASE}icons/`) || raw === `${BASE}manifest.webmanifest`) {
+      urls.add(raw);
+    }
   }
   return [...urls];
 }
@@ -70,7 +85,7 @@ async function precacheAppShell(cache) {
   await Promise.all(APP_SHELL.map((url) => addToCache(cache, url)));
   // 解析入口 HTML 里的 hashed 资源，使"首次访问后即可离线"。
   try {
-    const response = await fetch('/index.html', { cache: 'reload' });
+    const response = await fetch(`${BASE}index.html`, { cache: 'reload' });
     if (response && response.ok) {
       const html = await response.clone().text();
       const assets = extractBuildAssets(html);
@@ -117,9 +132,9 @@ async function handleNavigation(request) {
   } catch (err) {
     // 离线：优先返回应用壳（SPA 任意路径都回退到 index.html）。
     // ignoreVary：预缓存的 Request 与页面导航请求可能带不同 Origin 头（静态服务器常返回 Vary: Origin）。
-    const shell = await caches.match('/index.html', { cacheName: PRECACHE, ignoreVary: true });
+    const shell = await caches.match(`${BASE}index.html`, { cacheName: PRECACHE, ignoreVary: true });
     if (shell) return shell;
-    const root = await caches.match('/', { cacheName: PRECACHE, ignoreVary: true });
+    const root = await caches.match(BASE, { cacheName: PRECACHE, ignoreVary: true });
     if (root) return root;
     const cachedNav = await runtime.match(request, { ignoreVary: true });
     if (cachedNav) return cachedNav;
