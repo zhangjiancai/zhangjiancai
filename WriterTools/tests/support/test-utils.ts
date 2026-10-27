@@ -138,6 +138,8 @@ export interface HarnessOptions {
   autoSnapshot?: { maxEvents?: number; maxIntervalMs?: number };
   autoBackup?: { enabled?: boolean; debounceMs?: number; minIntervalMs?: number };
   fileSystemAccess?: boolean;
+  /** 原生备份目录桥（Android SAF 等）；提供后引擎优先使用 native 后端。 */
+  backupNative?: EngineOptions['backupNative'];
   requestPersistence?: boolean;
   /** undefined = 新建内存 OPFS；null = 禁用镜像；否则复用给定适配器。 */
   opfs?: OpfsAdapter | null;
@@ -169,6 +171,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     autoSnapshot: options.autoSnapshot,
     autoBackup: options.autoBackup,
     fileSystemAccess: options.fileSystemAccess,
+    backupNative: options.backupNative,
     requestPersistence: options.requestPersistence ?? false,
   };
   const engine = await createEngine(engineOptions);

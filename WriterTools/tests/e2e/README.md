@@ -71,6 +71,17 @@ $env:BASE_URL = 'http://127.0.0.1:4173'; node tests/e2e/run.mjs
 
 每一步输出一行 `PASS`/`FAIL`；失败时截图写入 `tests/e2e/artifacts/`（已 gitignore），进程退出码非 0。
 
+## Android APK 备份目录验收（v0.2.1，非 headless Web 步骤）
+
+Web 32 步保持不变；Android 原生备份目录（Capacitor WebView + `BackupFolder` SAF 插件）需在模拟器/真机单独验收，流程如下（详见 `ACCEPTANCE-v0.2.1.md` 与 `ACCEPTANCE-v0.2.0.md`）：
+
+1. 安装 `android/app/build/outputs/apk/debug/app-debug.apk`（或 `.lead-tmp/WriterTools-v0.2.1-android-debug.apk`，先核对 SHA-256）；`adb install -r` 后 `adb shell am start -n com.writertools.app/.MainActivity`。
+2. 用 WebView CDP 操作应用内 DOM：`adb shell cat /proc/net/unix | grep webview_devtools_remote` → `adb forward tcp:9224 localabstract:webview_devtools_remote_<pid>` → `http://127.0.0.1:9224/json/list`；可建作品、输入、点设置按钮、读 `[data-testid]`。
+3. Android 系统 SAF picker 无法用 DOM 自动化：用 `adb shell uiautomator dump /sdcard/window.xml` + `adb shell input tap/swipe/keyevent` 操作（新建/进入文件夹、`USE THIS FOLDER`、系统授权弹窗 `ALLOW`）。
+4. 断言：`backup-status` 含「已配置（<目录名>） · 手机目录」；目录内为**精确文件名** `writertools-manifest.json` + `<标题>-<docId8>.wtlog`（**不得有 `.txt` / `(1)(2)` 副本**）；拉回电脑用 `node tools/wtlog-check.mjs` 校验；编辑并关闭作品后 manifest `lastSeq/chars/updatedAt` 更新且仍只有同一批文件。
+5. 灾备：可删除 `app_webview`（保留 `shared_prefs/writertools_backup.xml`）模拟本地 Web 数据丢失 → 重启后点「从备份目录恢复」→「导入 1」；重启 App 验证 SAF 持久授权。旧 `.txt` 目录应能恢复（`normalizeBackupName`）。
+6. 结果与证据记录在 `tests/e2e/artifacts/android-*.json|png`（gitignore）。
+
 ## 失败排查
 
 - 截图在 `tests/e2e/artifacts/`（每次运行开始会清理上一次的全部产物，只保留 `.gitignore`）。

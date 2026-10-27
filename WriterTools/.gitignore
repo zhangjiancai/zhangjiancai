@@ -12,3 +12,13 @@ coverage/
 .tmp/
 .lead-tmp/
 *.log
+
+# Android（Capacitor）本地构建产物与机器相关配置
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/.idea/
+android/capacitor-cordova-android-plugins/build/

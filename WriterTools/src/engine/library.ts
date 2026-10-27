@@ -154,6 +154,8 @@ class LibraryEngineImpl implements LibraryEngine {
         flushAll: () => this.flush(),
       },
       this.options.fileSystemAccess !== false,
+      // 原生备份目录桥（Android SAF 等）：提供且可用时优先于 FSA
+      this.options.backupNative ?? null,
     );
 
     this.initAutoBackup();

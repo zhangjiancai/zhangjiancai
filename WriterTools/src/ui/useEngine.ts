@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createEngine } from '../engine';
 import type { LibraryEngine } from '../engine/types';
+import { createNativeBackupBridge } from '../platform/native-backup';
 
 interface EngineState {
   status: 'loading' | 'ready' | 'error';
@@ -51,7 +52,10 @@ async function loadFakeEngine(): Promise<LibraryEngine> {
 
 function loadEngine(): Promise<LibraryEngine> {
   if (enginePromise) return enginePromise;
-  const promise = import.meta.env.DEV && isDemoRequest() ? loadFakeEngine() : createEngine();
+  const promise =
+    import.meta.env.DEV && isDemoRequest()
+      ? loadFakeEngine()
+      : createEngine({ backupNative: createNativeBackupBridge() ?? undefined });
   enginePromise = promise.catch((error: unknown) => {
     enginePromise = null;
     throw error;

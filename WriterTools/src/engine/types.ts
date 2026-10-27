@@ -230,6 +230,9 @@ export interface StorageStatus {
 /** 备份目录的读写权限（浏览器支持 queryPermission 时）。 */
 export type BackupPermission = 'granted' | 'prompt' | 'denied' | 'unknown';
 
+/** 备份目录后端：浏览器 File System Access / 原生（Android SAF）/ 不可用。 */
+export type BackupBackend = 'fsa' | 'native' | 'none';
+
 export interface BackupStatus {
   configured: boolean;
   directoryName?: string;
@@ -240,6 +243,8 @@ export interface BackupStatus {
   permission?: BackupPermission;
   /** configured 为 true 但权限不是 granted（需要用户在设置里点「重新授权」）。 */
   needsPermission?: boolean;
+  /** 当前生效的备份目录后端。 */
+  backend?: BackupBackend;
 }
 
 export interface RecoveryReport {
@@ -454,6 +459,27 @@ export interface OpfsAdapter {
   remove(path: string): Promise<void>;
 }
 
+/**
+ * 原生备份目录桥（Android Storage Access Framework 等平台能力）。
+ * 由平台层实现并注入 EngineOptions.backupNative；提供后优先于 File System Access。
+ * 目录选择必须由用户手势触发（原生系统选择器）；目录 URI/权限由平台层自行持久化。
+ */
+export interface NativeBackupDirectoryBridge {
+  readonly available: boolean;
+  /** 弹出系统目录选择器；用户取消返回 null。必须在用户手势中调用。 */
+  chooseDirectory(): Promise<{ name: string } | null>;
+  /** 已持久化的目录；未选择或权限已失效返回 null。 */
+  getDirectory(): Promise<{ name: string } | null>;
+  /** 覆盖写入一个 UTF-8 文本文件（文件名仅限安全单段名）。 */
+  writeFile(name: string, text: string): Promise<void>;
+  /** 读取单个文本文件；不存在返回 null。 */
+  readFile(name: string): Promise<string | null>;
+  /** 列出目录内文本文件并读取内容（用于恢复）；不可读时抛错或返回空数组。 */
+  readFiles(): Promise<Array<{ name: string; text: string }>>;
+  /** 忘记已选目录（不删除目录里的文件）。 */
+  forgetDirectory(): Promise<void>;
+}
+
 export interface EngineOptions {
   /** IndexedDB 数据库名，默认 'writertools' */
   dbName?: string;
@@ -477,6 +503,11 @@ export interface EngineOptions {
    * 防抖 + 最小间隔合并，默认开启。默认 { debounceMs: 3000, minIntervalMs: 15000 }。
    */
   autoBackup?: { enabled?: boolean; debounceMs?: number; minIntervalMs?: number };
+  /**
+   * 原生备份目录桥（Android SAF 等平台能力）：提供后优先于 File System Access 使用。
+   * 由平台层（Capacitor 桥）实现并注入；Web 环境不传。
+   */
+  backupNative?: NativeBackupDirectoryBridge;
 }
 
 export type EngineFactory = (options?: EngineOptions) => Promise<LibraryEngine>;

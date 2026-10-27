@@ -8,7 +8,7 @@ import type { SnapshotInfo, SnapshotReason } from './types';
 import { FORMAT_MAJOR, FORMAT_MINOR, FORMAT_VERSION } from './types';
 
 export const APP_NAME = 'WriterTools';
-export const APP_VERSION = '0.2.0';
+export const APP_VERSION = '0.2.1';
 export const LOG_MAGIC = 'writertools-log';
 
 export type Affect = 'text' | 'meta';

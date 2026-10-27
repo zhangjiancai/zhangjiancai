@@ -56,7 +56,7 @@ interface FakeDoc {
   listeners: Set<Listener>;
 }
 
-const APP_INFO = { name: 'WriterTools', version: '0.2.0' };
+const APP_INFO = { name: 'WriterTools', version: '0.2.1' };
 
 function newId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();

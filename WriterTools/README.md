@@ -12,9 +12,10 @@
 - **本地多副本 + 启动自动恢复**：IndexedDB 主存储 + OPFS 镜像 + 可选备份目录；每次启动后台自动扫描镜像，主存储事件缺失/被截断时会自动从镜像补回并提示，不需要用户手动操作。多标签页同时打开时自动恢复会跳过被其它标签页写入的作品，避免并发冲突。
 - **全量备份包**：一键把所有作品（含回收站）导出为单个 `.wtzip`（ZIP 容器，内含校验清单与每篇 `.wtlog`），可跨设备迁移或在灾备时整包恢复；导入按「只增不删」合并，分歧只报告不覆盖。
 - **备份目录灾备恢复**：浏览器数据全部丢失后，重新选择备份目录、点「从备份目录恢复」，即可把磁盘上自动备份的 `.wtlog` 全部恢复回书架（先校验、只追加、不覆盖更新副本）。
+- **Android APK**：可直接安装的安卓包；通过 Android 系统文件夹选择器选择手机上的备份目录（SAF 持久授权），自动备份与「从备份目录恢复」在 App 内同样可用。卸载 App 会清空应用沙盒数据，但备份目录里的 `.wtlog` 文件会保留。
 - **PWA**：可安装到桌面或安卓主屏幕，缓存应用壳后可离线打开（数据本来就在本地）。
 
-> 状态：v0.2.0，功能可用但仍在完善；文件格式已定稿并由金标准文件守护向下兼容，见 [docs/FILE-FORMAT.md](docs/FILE-FORMAT.md)。使用说明见 [docs/USER-GUIDE.md](docs/USER-GUIDE.md)。
+> 状态：v0.2.1，功能可用但仍在完善；文件格式已定稿并由金标准文件守护向下兼容，见 [docs/FILE-FORMAT.md](docs/FILE-FORMAT.md)。使用说明见 [docs/USER-GUIDE.md](docs/USER-GUIDE.md)。
 
 ## 界面预览
 
@@ -77,6 +78,25 @@ Service Worker 只在**生产构建**中注册（`npm run build` + `npm run prev
 - **安卓 Chrome**：菜单 →「添加到主屏幕」/「安装应用」。
 - **离线使用**：首次打开并让 Service Worker 完成缓存后，断网仍可打开应用壳；正文与历史保存在浏览器本地存储中。
 
+## Android APK
+
+Android 包用 Capacitor 把同一套 Web 应用装进原生 WebView，可直接安装使用：
+
+```powershell
+npm install
+npm run build
+npx cap sync android
+cd android
+# 需要 JDK 21 + Android SDK 36；Windows 下：
+# gradlew.bat assembleDebug
+```
+
+产物：`android/app/build/outputs/apk/debug/app-debug.apk`（debug 签名，可直接侧载；正式分发需配置 release 签名）。
+
+- 备份目录通过 **Android 系统文件夹选择器（Storage Access Framework）** 选择，URI 授权持久化，重启 App 后仍然有效；自动备份、从备份目录恢复与浏览器版一致。
+- App 数据在 WebView 沙盒（IndexedDB + OPFS）内，卸载 App 会清空沙盒数据（备份目录里的文件不受影响）。
+- 受 WebView 下载能力限制，`.wtzip` / 单篇 `.wtlog` 的「导出下载」在 APK 内暂不可用；请用浏览器版导出，或依赖备份目录。
+
 ## 数据安全模型
 
 数据安全优先，所有操作可恢复：
@@ -85,7 +105,7 @@ Service Worker 只在**生产构建**中注册（`npm run build` + `npm run prev
 | --- | --- | --- |
 | 主存储 | IndexedDB（库 `writertools`） | 编辑事件实时追加，刷新/重启浏览器后仍在 |
 | 冗余镜像 | OPFS（源私有文件系统） | 冗余副本；主存储损坏时可按最长有效前缀恢复 |
-| 备份目录 | 用户选择的文件夹（File System Access） | 生成 `.wtlog` 副本与 `writertools-manifest.json` 清单，形成外部锚点 |
+| 备份目录 | 用户选择的文件夹（桌面 Chromium 用 File System Access；Android APK 用系统文件夹选择器） | 生成 `.wtlog` 副本与 `writertools-manifest.json` 清单，形成外部锚点 |
 | 全量备份包 | 用户下载的 `.wtzip` 文件 | 单个文件包含全部作品与校验锚点，可离线保存到任意位置或网盘 |
 
 - **只追加**：日志只允许在末尾追加事件，不得改写、删除、重排历史行。
@@ -120,6 +140,8 @@ src/
     types.ts             公共契约（UI 与引擎唯一接口）
     ...                  事件日志、规范化 JSON、哈希链、IDB/OPFS、快照、校验恢复
   ui/                    React 界面：书架、编辑器、版本历史、设置、录制器、样式
+  platform/              Capacitor 平台桥（Android SAF 备份目录插件适配）
+android/                 Capacitor Android 工程（BackupFolder SAF 插件 + 图标/启动图）
 docs/FILE-FORMAT.md      WTL v1.0 日志文件格式规范
 public/
   manifest.webmanifest   PWA 清单
@@ -128,7 +150,8 @@ public/
 tests/
   engine/                引擎单元测试（Vitest）
   e2e/run.mjs            Playwright 端到端冒烟场景（说明见 tests/e2e/README.md）
-  e2e/ACCEPTANCE-v0.2.0.md 最新端到端验收报告（v0.2.0 原始输入回放/查看面板；含格式抽查与人工验证清单）
+  e2e/ACCEPTANCE-v0.2.1.md 最新端到端验收报告（v0.2.1 Android APK 备份目录 + Web 全量回归）
+  e2e/ACCEPTANCE-v0.2.0.md v0.2.0 原始输入回放/查看面板验收报告（保留备查）
   e2e/ACCEPTANCE-v0.1.7.md v0.1.7 输入后立即 Esc 不丢字回归验收报告（保留备查）
   e2e/ACCEPTANCE-v0.1.6.md v0.1.6 备份权限健康检查/重新授权验收报告（保留备查）
   e2e/ACCEPTANCE-v0.1.5.md v0.1.5 失败路径韧性 + 训练数据导出验收报告（保留备查）
@@ -139,12 +162,13 @@ tests/
   e2e/ACCEPTANCE-v0.1.md   v0.1 基线验收报告（保留备查）
 ```
 
-## 已知限制（v0.1.7）
+## 已知限制（v0.2.1）
 
 - **无云同步**：数据只在本机当前浏览器中；换设备需手动备份/导出 `.wtlog` 或 `.wtzip`。
-- **备份目录自动备份需先手动选择一次目录**：之后才会自动写盘；浏览器数据丢失后需重新选择同一目录再点「从备份目录恢复」（目录句柄无法跨数据丢失保留）。浏览器重启/权限被撤销时需要点一次「重新授权备份目录」，期间自动备份会暂停并给出提示。自动备份失败不会打断书写，但会记录在设置的状态里。
+- **备份目录自动备份需先手动选择一次目录**：之后才会自动写盘；浏览器数据丢失后需重新选择同一目录再点「从备份目录恢复」（桌面浏览器目录句柄无法跨数据丢失保留；Android APK 的 SAF 授权可跨重启保留，但卸载重装后需重选）。浏览器重启/权限被撤销时需要点一次「重新授权备份目录」，期间自动备份会暂停并给出提示。自动备份失败不会打断书写，但会记录在设置的状态里。
 - **无端到端加密**：日志与备份均为明文 JSON Lines，安全性依赖设备与磁盘本身。
-- **备份目录仅限 Chromium 系桌面浏览器**：File System Access API 在 Chrome / Edge 桌面可用；其它浏览器仍可用 IndexedDB + OPFS 与手动导出。
+- **备份目录的平台差异**：桌面 Chromium 用 File System Access API；Android APK 用系统文件夹选择器（SAF）；其它浏览器仍可用 IndexedDB + OPFS 与手动导出。
+- **Android APK 的限制**：卸载 App 会清空 WebView 沙盒数据（备份目录文件保留）；WebView 内暂不支持 `.wtzip` / `.wtlog` 下载导出，导出请用浏览器版；当前 APK 为 debug 签名。
 - **回收站为软删除**：不自动清理，数据一直占用存储；符合「只增不删」原则。
 - **多标签页编辑**：同一作品被其它标签页打开时，本标签页为只读，避免并发写冲突。
 - **无日志压缩**：长历史文件会持续变大；压缩（compaction）属于后续版本能力，当前不提供。

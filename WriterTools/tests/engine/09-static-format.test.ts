@@ -45,7 +45,7 @@ describe('导出文件静态格式检查（独立校验，规范 2–4、7.1）'
     expect(header.prev).toBe('');
     expect(header.data.docId).toBe(doc.docId);
     expect(header.data.title).toBe('静态检查作品');
-    expect(header.data.app).toEqual({ name: 'WriterTools', version: '0.2.0' });
+    expect(header.data.app).toEqual({ name: 'WriterTools', version: '0.2.1' });
     expect(typeof header.data.createdAt).toBe('string');
 
     // 3) 写出的就是规范化 JSON（键排序、无空白），且无 BOM、LF 结尾

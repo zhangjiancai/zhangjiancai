@@ -1,7 +1,7 @@
 {
   "name": "writertools",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "WriterTools — 极简跨平台打字机写作工具：逐字符实时记录、可恢复版本历史",
   "scripts": {
@@ -18,11 +18,14 @@
     "smoke:ui": "node tools/browser-check.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
     "fflate": "^0.8.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

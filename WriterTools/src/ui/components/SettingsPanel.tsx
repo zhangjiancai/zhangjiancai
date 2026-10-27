@@ -31,6 +31,7 @@ import {
   formatBytes,
   formatDateTime,
 } from '../util';
+import { isNativeAndroidPlatform } from '../../platform/native-backup';
 import { Modal } from './Modal';
 import type { ToastKind } from './ToastHost';
 
@@ -122,7 +123,6 @@ export function SettingsPanel({ engine, settings, onChange, onClose, showToast, 
   const [archiveSource, setArchiveSource] = useState<ArchiveSource>(null);
   const shortcutInputRef = useRef<HTMLInputElement>(null);
   const archiveInputRef = useRef<HTMLInputElement>(null);
-
   const refreshStatus = useCallback(async () => {
     try {
       const [nextStorage, nextBackup] = await Promise.all([engine.storageStatus(), backupService.status()]);
@@ -389,7 +389,9 @@ export function SettingsPanel({ engine, settings, onChange, onClose, showToast, 
     event.currentTarget.blur();
   };
 
-  const canChooseDirectory = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+  const nativeAndroid = isNativeAndroidPlatform();
+  const canChooseDirectory =
+    nativeAndroid || (typeof window !== 'undefined' && 'showDirectoryPicker' in window);
   const archiveDisabled = busy !== null || archiveBusy !== null;
 
   return (
@@ -557,7 +559,9 @@ export function SettingsPanel({ engine, settings, onChange, onClose, showToast, 
                 备份目录：
                 {backup
                   ? backup.configured
-                    ? `已配置${backup.directoryName ? `（${backup.directoryName}）` : ''}`
+                    ? `已配置${backup.directoryName ? `（${backup.directoryName}）` : ''}${
+                        backup.backend === 'native' ? ' · 手机目录' : ''
+                      }`
                     : '未配置'
                   : '读取中…'}
                 {backup?.lastBackupAt ? ` · 上次备份 ${formatDateTime(backup.lastBackupAt)}` : ''}
@@ -588,7 +592,13 @@ export function SettingsPanel({ engine, settings, onChange, onClose, showToast, 
               {recoverResult}
             </div>
           ) : null}
-          {!canChooseDirectory ? (
+          {nativeAndroid ? (
+            <div className="status-line muted">
+              {backup?.configured
+                ? '已使用手机上的文件夹作为备份目录，自动备份受 Android 系统持久授权保护。'
+                : '选择手机上的文件夹用于自动备份（Android 系统文件选择器）。'}
+            </div>
+          ) : !canChooseDirectory ? (
             <div className="status-line muted">当前浏览器不支持选择备份目录（需要 Chrome / Edge 桌面版）。</div>
           ) : null}
           <div className="status-line muted">
